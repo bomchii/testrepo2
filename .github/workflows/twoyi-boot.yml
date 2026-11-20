@@ -8,10 +8,11 @@ name: twoyi-boot
 #
 # REGLA DURA: este repo NO contiene codigo de Twoyi. El front-end
 # (run.twoyi.app) y la ROM (seed v107) se DESCARGAN en tiempo de
-# ejecucion desde el sitio oficial (URLs publicas, sin auth) o se
-# restauran del cache de Actions cuando el build no cambio, y NUNCA se
-# commitean (mirror-v2/ esta en .gitignore). Los artefactos son SOLO
-# salidas del harness (summary, consola, capturas).
+# ejecucion desde el release privado bomchii/resources (con el token
+# secreto RESOURCES_TOKEN) o se restauran del cache de Actions cuando
+# el build no cambio, y NUNCA se commitean (mirror-v2/ esta en
+# .gitignore). Los artefactos son SOLO salidas del harness (summary,
+# consola, capturas).
 on:
   workflow_dispatch:
     inputs:
@@ -38,27 +39,23 @@ jobs:
         id: setup-chrome
         uses: browser-actions/setup-chrome@v1
 
+      # Los archivos de Twoyi (front-end + ROM) ya NO se bajan del sitio
+      # oficial: van por el release privado bomchii/resources (tag
+      # twoyi-v107), descargados con el token secreto RESOURCES_TOKEN
+      # (un PAT con lectura sobre ese repo privado; el GITHUB_TOKEN por
+      # defecto solo ve este repo). En hit de cache de Actions no se
+      # descarga nada; en miss, la descarga viene de GitHub (sin el 429
+      # de Cloudflare) y se verifica por SHA antes de extraer. El save
+      # del cache es explicito tras la descarga para que un archivo
+      # parcial nunca quede cacheado. Para adoptar un build nuevo, ver
+      # README-ACTIONS.md.
       - name: Cache del seed v107 (ROM, 471 MB)
         id: cache-seed
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: mirror-v2/seed.twoyi.app
           key: seed-v107-fd96c489
 
-      # El front-end (~85 MB, ~17 peticiones) se descargaba en CADA
-      # corrida y Cloudflare hace 429 tras ~10 peticiones rapidas.
-      # Ahora va por actions/cache con la misma tecnica que el seed:
-      # la clave es el pin del build (frontend-pin.txt). En hit de
-      # cache, CERO peticiones al sitio; la descarga completa solo
-      # corre cuando cambia el pin (nuevo build) o si el cache expira
-      # (7 dias sin uso / eviccion LRU). El save es un paso explicito
-      # tras la descarga (no el post-step automatico) para que un
-      # front-end parcial o con SHA incorrecto nunca quede cacheado:
-      # descargar-frontend.sh verifica el SHA del wasm y sale 1 si no
-      # coincide, asi que el save solo corre con un front-end
-      # verificado. Un redespliegue del sitio ya no rompe el loop: se
-      # sigue probando el build pineado hasta adoptar el nuevo a
-      # proposito (ver README-ACTIONS.md).
       - name: Restaurar cache del front-end
         id: cache-frontend
         uses: actions/cache/restore@v4
@@ -66,9 +63,11 @@ jobs:
           path: mirror-v2/run.twoyi.app
           key: frontend-${{ hashFiles('frontend-pin.txt') }}
 
-      - name: Descargar front-end nuevo (run.twoyi.app)
+      - name: Descargar front-end desde resources (si no hay cache)
         if: steps.cache-frontend.outputs.cache-hit != 'true'
-        run: bash scripts/descargar-frontend.sh
+        env:
+          GH_TOKEN: ${{ secrets.RESOURCES_TOKEN }}
+        run: bash scripts/descargar-resources.sh frontend
 
       - name: Guardar cache del front-end
         if: steps.cache-frontend.outputs.cache-hit != 'true'
@@ -77,9 +76,18 @@ jobs:
           path: mirror-v2/run.twoyi.app
           key: frontend-${{ hashFiles('frontend-pin.txt') }}
 
-      - name: Descargar seed v107 (si no hay cache)
+      - name: Descargar seed v107 desde resources (si no hay cache)
         if: steps.cache-seed.outputs.cache-hit != 'true'
-        run: bash scripts/descargar-seed.sh
+        env:
+          GH_TOKEN: ${{ secrets.RESOURCES_TOKEN }}
+        run: bash scripts/descargar-resources.sh seed
+
+      - name: Guardar cache del seed
+        if: steps.cache-seed.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: mirror-v2/seed.twoyi.app
+          key: seed-v107-fd96c489
 
       - name: Correr experimento ${{ inputs.experiment }}
         env:

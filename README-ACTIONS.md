@@ -12,16 +12,17 @@ Este repo lleva **solo nuestro código**: el harness CDP, el servidor
 `serve.py`, el aplicador de parches, las configs de experimentos G1–G9,
 los scripts de descarga y el workflow YAML. El front-end
 (`run.twoyi.app`, build con pack AOT) y la ROM (seed v107, 471 MB) se
-**descargan en tiempo de ejecución** desde el sitio oficial (URLs
-públicas, sin auth) y nunca se commitean (`mirror-v2/` está en
-`.gitignore`). Los artefactos que sube el workflow son solo salidas del
+**descargan en tiempo de ejecución** desde el release privado
+`bomchii/resources` (o se restauran del cache de Actions) y nunca se
+commitean (`mirror-v2/` está en `.gitignore`). Los artefactos que sube el workflow son solo salidas del
 harness (`summary.json`, `console.jsonl`, capturas PNG).
 
 ## Qué hay
 
 | Ruta | Qué es |
 |---|---|
-| `.github/workflows/twoyi-boot.yml` | Workflow: checkout, Node 24, Chrome, caché del seed y del front-end, descarga del front-end solo si no hay cache, experimento, verificación, artefactos |
+| `.github/workflows/twoyi-boot.yml` | Workflow: checkout, Node 24, Chrome, caché del seed y del front-end, descarga desde el release privado solo si no hay cache, experimento, verificación, artefactos |
+| `scripts/descargar-resources.sh` | Baja el front-end o el seed desde el release privado `bomchii/resources` (tag `twoyi-v107`) con `GH_TOKEN`; verifica el SHA del tarball y el SHA interno (wasm / ROM) antes de extraer |
 | `frontend-pin.txt` | Hash del build `rt/` que prueba el loop (hoy `16dba2d9d93b1a75`); es la clave del cache del front-end. Cambiarlo = descargar el build nuevo una vez y re-cachearlo |
 | `tests/twoyi-fullboot-cdp.mjs` | Harness CDP (Chrome real, sin Playwright). La ruta de Chrome viene de `TWOYI_CHROME_PATH` |
 | `scripts/serve.py` | Servidor local (COOP/COEP, rangos 206, reescribe `config.json` con seed/aot locales) |
@@ -91,19 +92,23 @@ pantalla (el ANR se dictamina mirando la última foto).
   `config.json` del build actual usa `aotUrls` (array); `serve.py`
   emite `aotUrl` y `aotUrls` en la config reescrita. `rt/bin/dalvikvm64`
   ya no lo sirve el sitio y nada lo descarga: la descarga es opcional.
-- **El front-end ya NO se descarga en cada corrida**: va por
-  `actions/cache` (key `frontend-<hash de frontend-pin.txt>`, ~85 MB),
-  igual que el seed (key `seed-v107-fd96c489`). En hit de cache, la
-  corrida hace **cero peticiones** a `run.twoyi.app`, así que el
-  rate-limit 429 de Cloudflare ya no puede tumbarla. La descarga
-  completa solo corre cuando cambia el pin o si el cache expira
-  (7 días sin uso / evicción LRU, 10 GB por repo). El save del cache
-  es un paso explícito tras la descarga para que un front-end parcial
-  o con SHA incorrecto nunca quede cacheado. Para adoptar un build
-  nuevo del sitio: actualizar `frontend-pin.txt` con el hash `rt/`
-  nuevo + `EXPECTED_WASM_SHA` en `scripts/descargar-frontend.sh`,
-  revisar los parches de `experiments-v3/`, y la siguiente corrida
-  descarga el build nuevo una vez y lo re-cachea. Un redespliegue
-  del sitio ya no rompe el loop: se sigue probando el build pineado.
+- **Ni el front-end ni el seed se descargan del sitio en las corridas**:
+  van por `actions/cache` (keys `frontend-<hash de frontend-pin.txt>` y
+  `seed-v107-fd96c489`) y, en cache-miss, se bajan del release privado
+  `bomchii/resources` (tag `twoyi-v107`) con `scripts/descargar-resources.sh`
+  y el token secreto `RESOURCES_TOKEN` — cero peticiones a
+  `run.twoyi.app` / `seed.twoyi.app`, así que el rate-limit 429 de
+  Cloudflare ya no puede tumbar una corrida. El save del cache es un
+  paso explícito tras la descarga para que un archivo parcial o con
+  SHA incorrecto nunca quede cacheado. El `GITHUB_TOKEN` por defecto
+  solo ve `testrepo2`, por eso el workflow usa `RESOURCES_TOKEN` (un
+  PAT con lectura sobre `bomchii/resources`, guardado como secreto
+  del repo). Para adoptar un build nuevo del sitio: bajarlo con
+  `scripts/descargar-frontend.sh` (actualizando `EXPECTED_WASM_SHA`),
+  empaquetarlo en `frontend-rt-<hash>.tar.gz`, subirlo como asset al
+  release `twoyi-v107` de `resources`, actualizar `frontend-pin.txt` +
+  el SHA del tarball en `descargar-resources.sh`, y revisar los parches
+  de `experiments-v3/`. Un redespliegue del sitio ya no rompe el loop:
+  se sigue probando el build pineado.
 - Coste: repo público → Actions es gratuito e ilimitado en runners
   estándar. Cada corrida G1 ≈ 6-8 min; un boot completo ≈ 30 min.
