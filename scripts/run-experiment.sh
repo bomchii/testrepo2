@@ -63,7 +63,7 @@ JSFLAGS=$(python3 -c "import json;print(json.load(open('$CFG')).get('js_flags','
 MINUTES=$(python3 -c "import json;print(json.load(open('$CFG')).get('minutes',20))")
 STAY=$(python3 -c "import json;print(json.load(open('$CFG')).get('stay_after_boot',300))")
 TAP=$(python3 -c "import json;print(json.load(open('$CFG')).get('tap_test',1))")
-AOT_URL=$(python3 -c "import json;print(json.load(open('$ROOT/mirror-v2/run.twoyi.app/config.json')).get('aotUrl',''))")
+AOT_URL=$(python3 -c "import json; c=json.load(open('$ROOT/mirror-v2/run.twoyi.app/config.json')); u=c.get('aotUrls') or ([c['aotUrl']] if c.get('aotUrl') else []); print(u[0] if u else '')" || true)
 [ -n "$AOT_URL" ] || { echo "FALLO: config.json descargado sin aotUrl" >&2; exit 1; }
 echo "Experimento: $EXP (pagina $PAGE, flags: ${FLAGS:-ninguno}, minutos: $MINUTES, stay: ${STAY}s, tap: $TAP, aotUrl: $AOT_URL)"
 
@@ -78,13 +78,14 @@ if ! curl -sf http://127.0.0.1:8083/__health__ >/dev/null 2>&1; then
   echo "FALLO: el servidor no levanto en 8083" >&2
   exit 1
 fi
-# Pre-flight: config.json debe traer seedUrl local Y aotUrl local. Sin
-# aotUrl el boot correria SIN el pack en silencio (aotPack() -> null).
-python3 - <<'PY'
-import json, urllib.request
+# Pre-flight: config.json debe traer seedUrl local Y aotUrls local. Sin
+# aotUrls el boot correria SIN el pack en silencio (aotPack() -> null).
+python3 - "$AOT_URL" <<'PY'
+import json, sys, urllib.request
+aot_url = sys.argv[1]
 cfg = json.load(urllib.request.urlopen("http://127.0.0.1:8083/config.json", timeout=5))
 assert cfg.get("seedUrl", "").startswith("http://127.0.0.1:8083/seed/"), cfg
-assert cfg.get("aotUrl", "").startswith("/aot/") and cfg["aotUrl"].endswith(".wasm"), cfg
+assert cfg.get("aotUrls") == [aot_url], cfg
 print("CONFIG OK:", cfg)
 PY
 echo "Servidor levantado en :8083 (pid $SRV_PID)"

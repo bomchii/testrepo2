@@ -80,10 +80,16 @@ pantalla (el ANR se dictamina mirando la última foto).
   alta en vez de correr con la ROM original. Hay que construir la copia
   en el runner antes (procedimiento en el informe `rom-build-prop.md`
   del proyecto local) o lanzar G7/G9 en local.
-- **El SHA de `neo-web.wasm` está fijado** al build
-  `rt/1e56ecde9f337f28` (contra el que se verificaron los parches). Si
-  `run.twoyi.app` redespliega, `descargar-frontend.sh` falla en voz alta
-  y hay que revisar los parches antes de correr.
+- **El SHA de `neo-web.wasm` está fijado** al build actual
+  (`rt/16dba2d9d93b1a75`, wasm 11.217.644 B, SHA-256
+  `7bfcf6f3…dce9dc3e`; pack AOT `/aot/ab41ad1ebf108da6.wasm`,
+  75.031.139 B). `run.twoyi.app` redespliega a menudo (el build
+  anterior, `rt/1e56ecde9f337f28`, ya da 404): si el SHA cambia,
+  `descargar-frontend.sh` falla en voz alta y hay que actualizar el
+  pin y revisar los parches de `experiments-v3/` antes de correr.
+  `config.json` del build actual usa `aotUrls` (array); `serve.py`
+  emite `aotUrl` y `aotUrls` en la config reescrita. `rt/bin/dalvikvm64`
+  ya no lo sirve el sitio y nada lo descarga: la descarga es opcional.
 - El front-end se descarga en cada corrida (~85 MB + pausas de 2 s por
   el rate-limit de Cloudflare); el seed va por `actions/cache`
   (key `seed-v107-fd96c489`, 10 GB por repo).

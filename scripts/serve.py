@@ -349,12 +349,15 @@ class TwoyiHandler(BaseHTTPRequestHandler):
             else:
                 seed_url = f"https://seed.twoyi.app/{SEED_VERSION}"
             cfg_out = {"seedUrl": seed_url}
-            # Build nuevo (mirror-v2): sin aotUrl en config.json el pack AOT
-            # NO se descarga (aotPack() devuelve null salvo ?aot=on, que
-            # buscaria un aot.wasm inexistente). El runner v3 pasa --aot-url
-            # y verifica que config.json lo contenga antes del harness.
+            # Build nuevo: el front-end lee config.json {seedUrl, aotUrls}
+            # (array; el formato viejo usaba aotUrl como cadena). Sin
+            # aotUrls el pack AOT NO se descarga (aotPack() devuelve null
+            # salvo ?aot=on, que buscaria un aot.json inexistente). El
+            # runner pasa --aot-url y verifica que config.json lo contenga
+            # antes del harness. Se emiten las dos claves por compatibilidad.
             if self.aot_url_override:
                 cfg_out["aotUrl"] = self.aot_url_override
+                cfg_out["aotUrls"] = [self.aot_url_override]
             body = (json.dumps(cfg_out) + "\n").encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")

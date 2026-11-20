@@ -13,8 +13,11 @@ set -euo pipefail
 UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"
 FRONT="mirror-v2/run.twoyi.app"
 # Build contra el que se verificaron los parches de los experimentos G1-G9.
-EXPECTED_WASM_SHA="df818bf563ce59a0cbbdde279ed3ff8173af37e339e0358866655b3fa93569eb"
-EXPECTED_WASM_BYTES=10960502
+# OJO: run.twoyi.app redespliega a menudo (el build anterior,
+# rt/1e56ecde9f337f28, ya da 404); si el SHA cambia, se falla en voz alta
+# y hay que revisar los parches antes de correr.
+EXPECTED_WASM_SHA="7bfcf6f3fd987646c4195260b966a1e29df24f23971f1361f20947acdce9dc3e"
+EXPECTED_WASM_BYTES=11217644
 mkdir -p "$FRONT/rt" "$FRONT/aot" "$FRONT"
 get() { # get URL DESTINO (falla en voz alta con diagnostico)
   echo "GET $1 -> $2"
@@ -33,11 +36,13 @@ get() { # get URL DESTINO (falla en voz alta con diagnostico)
   exit 1
 }
 get "https://run.twoyi.app/" "$FRONT/index.html"
-RT=$(grep -oE 'rt/[0-9a-f]{32}/neo-web\.js' "$FRONT/index.html" | head -1 | cut -d/ -f2)
+RT=$(grep -oE 'rt/[0-9a-f]{16,64}/neo-web\.js' "$FRONT/index.html" | head -1 | cut -d/ -f2 || true)
 [ -n "$RT" ] || { echo "FALLO: no se encontro el hash rt/ en index.html (redespliegue?)" >&2; exit 1; }
 echo "Build rt/: $RT"
 get "https://run.twoyi.app/config.json" "$FRONT/config.json"
-AOT_URL=$(python3 -c "import json;print(json.load(open('$FRONT/config.json')).get('aotUrl',''))")
+# config.json del build nuevo: {seedUrl, aotUrls:[...]} (el formato viejo
+# tenia aotUrl como cadena; se aceptan los dos, con prioridad al array).
+AOT_URL=$(python3 -c "import json; c=json.load(open('$FRONT/config.json')); u=c.get('aotUrls') or ([c['aotUrl']] if c.get('aotUrl') else []); print(u[0] if u else '')" || true)
 [ -n "$AOT_URL" ] || { echo "FALLO: config.json sin aotUrl" >&2; exit 1; }
 echo "aotUrl: $AOT_URL"
 get "https://run.twoyi.app/sw.js" "$FRONT/sw.js"
@@ -53,22 +58,35 @@ get "https://run.twoyi.app/warm.js" "$FRONT/warm.js"
 mkdir -p "$FRONT/rt/$RT"
 get "https://run.twoyi.app/rt/$RT/neo-web.js" "$FRONT/rt/$RT/neo-web.js"
 get "https://run.twoyi.app/rt/$RT/neo-web.wasm" "$FRONT/rt/$RT/neo-web.wasm"
-get "https://run.twoyi.app/rt/bin/dalvikvm64" "$FRONT/rt/bin/dalvikvm64"
+# rt/bin/dalvikvm64 existia en el build anterior pero el nuevo no lo
+# sirve (404) y nada del front-end lo descarga (solo aparece como
+# etiqueta de un boton y como ruta DENTRO del invitado). Descarga
+# opcional: si vuelve a existir, se baja; si no, se sigue sin el.
+if ! curl -sfL -A "$UA" -o "$FRONT/rt/bin/dalvikvm64" "https://run.twoyi.app/rt/bin/dalvikvm64"; then
+  echo "AVISO: rt/bin/dalvikvm64 no existe en este build (404); se sigue sin el"
+  rm -f "$FRONT/rt/bin/dalvikvm64"
+fi
+sleep 2
 echo "--- pack AOT ---"
 get "https://run.twoyi.app$AOT_URL" "$FRONT$AOT_URL"
 echo "--- verificacion ---"
 WASM_BYTES=$(stat -c%s "$FRONT/rt/$RT/neo-web.wasm")
 WASM_SHA=$(sha256sum "$FRONT/rt/$RT/neo-web.wasm" | awk '{print $1}')
 AOT_BYTES=$(stat -c%s "$FRONT$AOT_URL")
+AOT_SHA=$(sha256sum "$FRONT$AOT_URL" | awk '{print $1}')
+AOT_HASH_PREFIX=$(basename "$AOT_URL" .wasm)
 echo "neo-web.wasm: $WASM_BYTES B sha256=$WASM_SHA"
-echo "pack AOT ($AOT_URL): $AOT_BYTES B"
+echo "pack AOT ($AOT_URL): $AOT_BYTES B sha256=$AOT_SHA"
 [ "$WASM_BYTES" = "$EXPECTED_WASM_BYTES" ] || { echo "AVISO: neo-web.wasm cambio de tamano (esperado $EXPECTED_WASM_BYTES)" >&2; }
 if [ "$WASM_SHA" != "$EXPECTED_WASM_SHA" ]; then
-  echo "FALLO: neo-web.wasm NO es el build rt/1e56ecde9f337f28 contra el que se verificaron los parches." >&2
+  echo "FALLO: neo-web.wasm NO es el build rt/16dba2d9d93b1a75 contra el que se verificaron los parches." >&2
   echo "El sitio redesplego: hay que revisar los parches de experiments-v3/ antes de correr." >&2
   exit 1
 fi
 [ "$AOT_BYTES" -gt 1000000 ] || { echo "FALLO: pack AOT sospechosamente pequeno ($AOT_BYTES B)" >&2; exit 1; }
+# El nombre del pack ES el prefijo de su SHA-256 (16 hex): verificacion
+# autoconsistente que sobrevive a redespliegues.
+[ "${AOT_SHA:0:16}" = "$AOT_HASH_PREFIX" ] || { echo "FALLO: el SHA del pack AOT no coincide con su nombre ($AOT_SHA vs $AOT_HASH_PREFIX)" >&2; exit 1; }
 find "$FRONT" -type f | sort
 du -sh mirror-v2
 echo "OK: front-end descargado y verificado."
