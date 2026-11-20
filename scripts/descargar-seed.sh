@@ -15,7 +15,12 @@ EXPECTED_BYTES=471289100
 mkdir -p "$DEST"
 for f in rom.json launch-env.json seed.index metadata.sqlite; do
   echo "GET $SEED/$f -> $DEST/$f"
-  curl -sfL -A "$UA" -o "$DEST/$f" "$SEED/$f"
+  if ! curl -sfL -A "$UA" -o "$DEST/$f" "$SEED/$f"; then
+    echo "AVISO: curl fallo para $SEED/$f; diagnostico (sin -f):" >&2
+    curl -sL -A "$UA" -o /dev/null -w "HTTP %{http_code}\n" "$SEED/$f" || true
+    curl -sIL -A "$UA" "$SEED/$f" | head -15 || true
+    exit 1
+  fi
   sleep 2
 done
 echo "Descargando $SEED/rom.tar.gz -> $DEST/rom.tar.gz (reanudable, 3 reintentos)"

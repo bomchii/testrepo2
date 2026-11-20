@@ -16,10 +16,21 @@ FRONT="mirror-v2/run.twoyi.app"
 EXPECTED_WASM_SHA="df818bf563ce59a0cbbdde279ed3ff8173af37e339e0358866655b3fa93569eb"
 EXPECTED_WASM_BYTES=10960502
 mkdir -p "$FRONT/rt" "$FRONT/aot" "$FRONT"
-get() { # get URL DESTINO (falla en voz alta con 404/429, no guarda basura)
+get() { # get URL DESTINO (falla en voz alta con diagnostico)
   echo "GET $1 -> $2"
-  curl -sfL -A "$UA" -o "$2" "$1"
-  sleep 2
+  if curl -sfL -A "$UA" -o "$2" "$1"; then
+    sleep 2
+    return 0
+  fi
+  echo "AVISO: curl fallo para $1; diagnostico (sin -f):" >&2
+  curl -sL -A "$UA" -o /tmp/diag-body.txt -w "HTTP %{http_code} (url efectiva %{url_effective})\n" "$1" || true
+  echo "--- cabeceras ---" >&2
+  curl -sIL -A "$UA" "$1" | head -20 || true
+  echo "--- cuerpo (primeros 500 B) ---" >&2
+  head -c 500 /tmp/diag-body.txt || true
+  echo >&2
+  rm -f /tmp/diag-body.txt
+  exit 1
 }
 get "https://run.twoyi.app/" "$FRONT/index.html"
 RT=$(grep -oE 'rt/[0-9a-f]{32}/neo-web\.js' "$FRONT/index.html" | head -1 | cut -d/ -f2)
