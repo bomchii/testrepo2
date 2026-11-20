@@ -10,3 +10,5 @@ runs/
 tests/.chrome-profile-fullboot
 *.log
 .DS_Store
+
+__pycache__/
