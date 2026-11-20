@@ -21,11 +21,12 @@ harness (`summary.json`, `console.jsonl`, capturas PNG).
 
 | Ruta | Qué es |
 |---|---|
-| `.github/workflows/twoyi-boot.yml` | Workflow: checkout, Node 24, Chrome, caché del seed, descarga del front-end, experimento, verificación, artefactos |
+| `.github/workflows/twoyi-boot.yml` | Workflow: checkout, Node 24, Chrome, caché del seed y del front-end, descarga del front-end solo si no hay cache, experimento, verificación, artefactos |
+| `frontend-pin.txt` | Hash del build `rt/` que prueba el loop (hoy `16dba2d9d93b1a75`); es la clave del cache del front-end. Cambiarlo = descargar el build nuevo una vez y re-cachearlo |
 | `tests/twoyi-fullboot-cdp.mjs` | Harness CDP (Chrome real, sin Playwright). La ruta de Chrome viene de `TWOYI_CHROME_PATH` |
 | `scripts/serve.py` | Servidor local (COOP/COEP, rangos 206, reescribe `config.json` con seed/aot locales) |
 | `scripts/opt-apply-patches.py` | Aplica los parches `{search, replace}` de la config al front-end |
-| `scripts/descargar-frontend.sh` | Baja el front-end actual; verifica el SHA de `neo-web.wasm` contra el build `rt/1e56ecde9f337f28` |
+| `scripts/descargar-frontend.sh` | Baja el front-end actual; verifica el SHA de `neo-web.wasm` contra el build pineado (`rt/16dba2d9d93b1a75`) |
 | `scripts/descargar-seed.sh` | Baja el seed v107 (5 archivos, SHA verificado) |
 | `scripts/run-experiment.sh` | Corre un experimento: copia el front-end, parche del detector (10% → 2%), parches de la config, servidor, harness |
 | `experiments-v3/G1..G9/config.json` | Configs del loop v3 (misma cola que el loop local) |
@@ -90,8 +91,19 @@ pantalla (el ANR se dictamina mirando la última foto).
   `config.json` del build actual usa `aotUrls` (array); `serve.py`
   emite `aotUrl` y `aotUrls` en la config reescrita. `rt/bin/dalvikvm64`
   ya no lo sirve el sitio y nada lo descarga: la descarga es opcional.
-- El front-end se descarga en cada corrida (~85 MB + pausas de 2 s por
-  el rate-limit de Cloudflare); el seed va por `actions/cache`
-  (key `seed-v107-fd96c489`, 10 GB por repo).
+- **El front-end ya NO se descarga en cada corrida**: va por
+  `actions/cache` (key `frontend-<hash de frontend-pin.txt>`, ~85 MB),
+  igual que el seed (key `seed-v107-fd96c489`). En hit de cache, la
+  corrida hace **cero peticiones** a `run.twoyi.app`, así que el
+  rate-limit 429 de Cloudflare ya no puede tumbarla. La descarga
+  completa solo corre cuando cambia el pin o si el cache expira
+  (7 días sin uso / evicción LRU, 10 GB por repo). El save del cache
+  es un paso explícito tras la descarga para que un front-end parcial
+  o con SHA incorrecto nunca quede cacheado. Para adoptar un build
+  nuevo del sitio: actualizar `frontend-pin.txt` con el hash `rt/`
+  nuevo + `EXPECTED_WASM_SHA` en `scripts/descargar-frontend.sh`,
+  revisar los parches de `experiments-v3/`, y la siguiente corrida
+  descarga el build nuevo una vez y lo re-cachea. Un redespliegue
+  del sitio ya no rompe el loop: se sigue probando el build pineado.
 - Coste: repo público → Actions es gratuito e ilimitado en runners
   estándar. Cada corrida G1 ≈ 6-8 min; un boot completo ≈ 30 min.

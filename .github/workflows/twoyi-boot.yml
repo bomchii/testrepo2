@@ -8,7 +8,8 @@ name: twoyi-boot
 #
 # REGLA DURA: este repo NO contiene codigo de Twoyi. El front-end
 # (run.twoyi.app) y la ROM (seed v107) se DESCARGAN en tiempo de
-# ejecucion desde el sitio oficial (URLs publicas, sin auth) y NUNCA se
+# ejecucion desde el sitio oficial (URLs publicas, sin auth) o se
+# restauran del cache de Actions cuando el build no cambio, y NUNCA se
 # commitean (mirror-v2/ esta en .gitignore). Los artefactos son SOLO
 # salidas del harness (summary, consola, capturas).
 on:
@@ -44,8 +45,37 @@ jobs:
           path: mirror-v2/seed.twoyi.app
           key: seed-v107-fd96c489
 
+      # El front-end (~85 MB, ~17 peticiones) se descargaba en CADA
+      # corrida y Cloudflare hace 429 tras ~10 peticiones rapidas.
+      # Ahora va por actions/cache con la misma tecnica que el seed:
+      # la clave es el pin del build (frontend-pin.txt). En hit de
+      # cache, CERO peticiones al sitio; la descarga completa solo
+      # corre cuando cambia el pin (nuevo build) o si el cache expira
+      # (7 dias sin uso / eviccion LRU). El save es un paso explicito
+      # tras la descarga (no el post-step automatico) para que un
+      # front-end parcial o con SHA incorrecto nunca quede cacheado:
+      # descargar-frontend.sh verifica el SHA del wasm y sale 1 si no
+      # coincide, asi que el save solo corre con un front-end
+      # verificado. Un redespliegue del sitio ya no rompe el loop: se
+      # sigue probando el build pineado hasta adoptar el nuevo a
+      # proposito (ver README-ACTIONS.md).
+      - name: Restaurar cache del front-end
+        id: cache-frontend
+        uses: actions/cache/restore@v4
+        with:
+          path: mirror-v2/run.twoyi.app
+          key: frontend-${{ hashFiles('frontend-pin.txt') }}
+
       - name: Descargar front-end nuevo (run.twoyi.app)
+        if: steps.cache-frontend.outputs.cache-hit != 'true'
         run: bash scripts/descargar-frontend.sh
+
+      - name: Guardar cache del front-end
+        if: steps.cache-frontend.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: mirror-v2/run.twoyi.app
+          key: frontend-${{ hashFiles('frontend-pin.txt') }}
 
       - name: Descargar seed v107 (si no hay cache)
         if: steps.cache-seed.outputs.cache-hit != 'true'
