@@ -69,7 +69,10 @@ echo "Experimento: $EXP (pagina $PAGE, flags: ${FLAGS:-ninguno}, minutos: $MINUT
 
 python3 "$ROOT/scripts/serve.py" --port 8083 --root "$WORK" --aot-url "$AOT_URL" > "$RUN_DIR/server.log" 2>&1 &
 SRV_PID=$!
-trap 'kill $SRV_PID 2>/dev/null; wait $SRV_PID 2>/dev/null' EXIT
+# OJO: sin el `|| true`, el `wait` devuelve 143 (el servidor muere por
+# SIGTERM) y el trap EXIT pisaria el exit 0 del script con 143: el job
+# de Actions saldria "failure" aunque el experimento produjo datos.
+trap 'kill $SRV_PID 2>/dev/null; wait $SRV_PID 2>/dev/null || true' EXIT
 for i in $(seq 1 50); do
   if curl -sf http://127.0.0.1:8083/__health__ >/dev/null 2>&1; then break; fi
   sleep 0.2
