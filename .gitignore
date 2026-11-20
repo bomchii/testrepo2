@@ -1,0 +1,12 @@
+# .gitignore — testrepo2 (loop v3 de Twoyi en GitHub Actions)
+# Descargas en tiempo de ejecucion: codigo cerrado de Twoyi (front-end y
+# ROM). NUNCA se commitean; el workflow las baja del sitio oficial.
+mirror-v2/
+mirror/
+# Salidas de los experimentos (van como artefactos de Actions, no a git)
+work/
+runs/
+# Perfil de Chrome del harness (Cache Storage ~1,26 GB)
+tests/.chrome-profile-fullboot
+*.log
+.DS_Store

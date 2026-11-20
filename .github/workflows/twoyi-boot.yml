@@ -1,0 +1,83 @@
+name: twoyi-boot
+# Corre UN experimento del loop v3 de Twoyi Web (Android 13 en el
+# navegador) en un runner GitHub-hosted (repo publico: 4 vCPU, 16 GB RAM,
+# 14 GB SSD). El boot pica ~4,6 GB de RSS, asi que cabe con margen; el
+# runner es una VM nueva en cada corrida, sin el globo de RAM de la VM
+# local. Lanzamiento: gh workflow run twoyi-boot.yml -f experiment=G1
+# (ver README-ACTIONS.md).
+#
+# REGLA DURA: este repo NO contiene codigo de Twoyi. El front-end
+# (run.twoyi.app) y la ROM (seed v107) se DESCARGAN en tiempo de
+# ejecucion desde el sitio oficial (URLs publicas, sin auth) y NUNCA se
+# commitean (mirror-v2/ esta en .gitignore). Los artefactos son SOLO
+# salidas del harness (summary, consola, capturas).
+on:
+  workflow_dispatch:
+    inputs:
+      experiment:
+        description: 'ID del experimento (G1..G9)'
+        required: true
+        default: 'G1'
+        type: choice
+        options: [G1, G2, G3a, G3b, G4, G5, G6a, G6b, G7, G8, G9]
+
+jobs:
+  boot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Chrome for Testing
+        id: setup-chrome
+        uses: browser-actions/setup-chrome@v1
+
+      - name: Cache del seed v107 (ROM, 471 MB)
+        id: cache-seed
+        uses: actions/cache@v4
+        with:
+          path: mirror-v2/seed.twoyi.app
+          key: seed-v107-fd96c489
+
+      - name: Descargar front-end nuevo (run.twoyi.app)
+        run: bash scripts/descargar-frontend.sh
+
+      - name: Descargar seed v107 (si no hay cache)
+        if: steps.cache-seed.outputs.cache-hit != 'true'
+        run: bash scripts/descargar-seed.sh
+
+      - name: Correr experimento ${{ inputs.experiment }}
+        env:
+          TWOYI_CHROME_PATH: ${{ steps.setup-chrome.outputs.chrome-path }}
+        run: bash scripts/run-experiment.sh ${{ inputs.experiment }}
+
+      - name: Verificar linea NEO_ENGINE requested=
+        if: always()
+        run: |
+          echo "--- NEO_ENGINE requested= ---"
+          grep -h "NEO_ENGINE requested=" runs/${{ inputs.experiment }}/console.jsonl | tail -2 || echo "SIN LINEA NEO_ENGINE requested= en console.jsonl"
+          echo "--- lineas NEO_AOT: $(grep -c 'NEO_AOT' runs/${{ inputs.experiment }}/console.jsonl || true) ---"
+          echo "--- summary.json ---"
+          cat runs/${{ inputs.experiment }}/summary.json 2>/dev/null | python3 -c "import json,sys; s=json.load(sys.stdin); print({k: s.get(k) for k in ['booted','crashed','guestRatio','guestMaxS','wasmPeakMB','chromeRssPeakMB','engineRequested','engineStatsLast','aotLines']})" || echo "sin summary.json"
+          test -n "$(grep -h 'NEO_ENGINE requested=' runs/${{ inputs.experiment }}/console.jsonl | head -1)" || { echo "FALLO: no se capturo la linea NEO_ENGINE requested= (el motor no arranco o el servido fallo)"; exit 1; }
+
+      - name: Subir artefactos
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.experiment }}-resultados
+          path: |
+            runs/${{ inputs.experiment }}/summary.json
+            runs/${{ inputs.experiment }}/harness-exit.txt
+            runs/${{ inputs.experiment }}/console.jsonl
+            runs/${{ inputs.experiment }}/status.jsonl
+            runs/${{ inputs.experiment }}/chrome.log
+            runs/${{ inputs.experiment }}/server.log
+            runs/${{ inputs.experiment }}/shots/
+          if-no-files-found: warn
+          retention-days: 30
