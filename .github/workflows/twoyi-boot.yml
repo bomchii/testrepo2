@@ -17,11 +17,11 @@ on:
   workflow_dispatch:
     inputs:
       experiment:
-        description: 'ID del experimento (G1..G10)'
+        description: 'ID del experimento (G1..G10, sondas S1A/S1B/S2S/S2B)'
         required: true
         default: 'G1'
         type: choice
-        options: [G1, G2, G3a, G3b, G4, G5, G6a, G6b, G7, G8, G9, G10]
+        options: [G1, G2, G3a, G3b, G4, G5, G6a, G6b, G7, G8, G9, G10, S1A, S1B, S2S, S2B]
 
 jobs:
   boot:
