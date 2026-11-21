@@ -21,7 +21,7 @@ on:
         required: true
         default: 'G1'
         type: choice
-        options: [G1, G2, G3a, G3b, G4, G5, G6a, G6b, G7, G8, G9, G10, S1A, S1B, S2S, S2B]
+        options: [G1, G2, G3a, G3b, G4, G5, G6a, G6b, G7, G8, G9, G10, S1A, S1B, S2S, S2B, R1]
 
 jobs:
   boot:
@@ -164,6 +164,7 @@ jobs:
             runs/${{ inputs.experiment }}/harness-exit.txt
             runs/${{ inputs.experiment }}/console.jsonl
             runs/${{ inputs.experiment }}/status.jsonl
+            runs/${{ inputs.experiment }}/page-log.txt
             runs/${{ inputs.experiment }}/chrome.log
             runs/${{ inputs.experiment }}/server.log
             runs/${{ inputs.experiment }}/shots/

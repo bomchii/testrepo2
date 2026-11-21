@@ -108,6 +108,41 @@ function chromeRssSplitMB() {
   } catch { return null; }
 }
 
+// Regimen (R1): estadisticas de un volcado `dumpsys gfxinfo framestats`.
+// Cada fila CSV tiene 17+ columnas; FrameCompleted es la 13 (indice 13,
+// nanosegundos del reloj monotono del invitado). El span de FrameCompleted
+// entre la primera y la ultima fila es tiempo de invitado transcurrido en
+// la ventana: dividido por el tiempo de pared entre los marcadores BEGIN
+// y END da la velocidad del invitado en regimen (1,0 = tiempo real).
+// Las filas con FrameCompleted<=0 son huecos del anillo y se descartan.
+function framestatsStats(rows, wallSpanS) {
+  const comp = [];
+  let jankVsync = 0, withVsync = 0;
+  for (const row of rows) {
+    const c = row.split(',').map(s => parseInt(s.trim(), 10));
+    if (c.length < 14 || isNaN(c[13]) || c[13] <= 0) continue;
+    comp.push(c[13]);
+    if (!isNaN(c[1]) && c[1] > 0) { withVsync++; if (c[13] - c[1] > 16700000) jankVsync++; }
+  }
+  if (comp.length < 2) return { n: comp.length, guestSpanS: null, ratio: null, note: 'muy pocos frames validos' };
+  comp.sort((a, b) => a - b);
+  const guestSpanS = (comp[comp.length - 1] - comp[0]) / 1e9;
+  const iv = [];
+  for (let i = 1; i < comp.length; i++) iv.push((comp[i] - comp[i - 1]) / 1e6);
+  iv.sort((a, b) => a - b);
+  const pct = p => iv.length ? Math.round(iv[Math.min(iv.length - 1, Math.floor(p * iv.length))] * 10) / 10 : null;
+  return {
+    n: comp.length,
+    guestSpanS: Math.round(guestSpanS * 10) / 10,
+    wallSpanS: wallSpanS != null ? Math.round(wallSpanS * 10) / 10 : null,
+    ratio: wallSpanS ? Math.round(guestSpanS / wallSpanS * 100) / 100 : null,
+    p50ms: pct(0.5), p95ms: pct(0.95),
+    pctOver16_7: Math.round(iv.filter(x => x > 16.7).length / iv.length * 1000) / 10,
+    pctOver33_4: Math.round(iv.filter(x => x > 33.4).length / iv.length * 1000) / 10,
+    jankVsyncPct: withVsync ? Math.round(jankVsync / withVsync * 1000) / 10 : null,
+  };
+}
+
 // Sonda de boot (E11, corregida en E12): la pagina tiene DOS canvas en
 // #display: #screen (360x640, modo software, display:none en modo GPU) y
 // #gfxstream (720x1280, modo GPU, display:none en modo software). El primer
@@ -156,6 +191,10 @@ async function main() {
   const summary = { base: BASE, started: now(), minutes: MINUTES, chrome: CHROME_VERSION, chromePath: CHROME, events: [] };
   let wasmPeakMB = 0, rssPeakMB = 0, rssSplitPeak = null;
   let fpsSamples = [], guestMaxS = 0;
+  // Regimen (R1): NEO_FPS del drag #fps-gpu + volcados framestats del invitado.
+  const regime = { fps: null, gpuStatWindows: 0, fs: { FRAMESTATS: { rows: [], beginS: null, endS: null }, FRAMESTATS2: { rows: [], beginS: null, endS: null } }, tsAvgFps: [] };
+  let fsActive = null; // 'FRAMESTATS' | 'FRAMESTATS2' mientras dura un volcado
+  let tsActive = null; // 'TIMESTATS' | 'TIMESTATS2' mientras dura su volcado
   const note = (ev, detail = '') => { summary.events.push({ t: now(), elapsed_s: Math.round((Date.now() - t0) / 1000), ev, detail: String(detail).slice(0, 500) }); console.log(`[${Math.round((Date.now() - t0) / 1000)}s] ${ev} ${detail}`.slice(0, 300)); };
 
   // Servidor (log a fichero, no a pipe: un pipe roto no debe tumbarlo)
@@ -237,6 +276,30 @@ async function main() {
           (summary.aotLines = summary.aotLines || []).push(e.text.slice(0, 300));
           if (summary.aotLines.length > 5) summary.aotLines.shift();
         }
+        // Regimen (R1): NEO_FPS del drag #fps-gpu (frames posteados/s bajo
+        // carga, la medida de fluidez del propio autor) y volcados
+        // framestats/timestats del invitado (reloj monotono del guest).
+        if (e.text.startsWith('NEO_FPS')) {
+          const m = e.text.match(/posts=(\d+)\s+seconds=([\d.]+)\s+fps=([\d.]+)/);
+          if (m) { regime.fps = { posts: parseInt(m[1], 10), seconds: parseFloat(m[2]), fps: parseFloat(m[3]), atS: Math.round((Date.now() - t0) / 1000) }; note('regime-fps', `NEO_FPS posts=${m[1]} seconds=${m[2]} fps=${m[3]}`); }
+        }
+        if (e.text.startsWith('NEO_GPU_STAT')) regime.gpuStatWindows++;
+        const fsM = e.text.match(/^(FRAMESTATS2?|TIMESTATS2?)_(BEGIN|END)$/);
+        if (fsM) {
+          const key = fsM[1], kind = fsM[2];
+          const atS = Math.round((Date.now() - t0) / 1000);
+          if (key.startsWith('FRAMESTATS')) {
+            if (kind === 'BEGIN') { fsActive = key; regime.fs[key].beginS = atS; regime.fs[key].rows = []; }
+            else if (fsActive === key) { fsActive = null; regime.fs[key].endS = atS; note('framestats', `${key}: ${regime.fs[key].rows.length} filas, pared ${regime.fs[key].beginS}-${atS} s`); }
+          } else {
+            tsActive = kind === 'BEGIN' ? key : null;
+          }
+        } else if (fsActive && /^\d+,/.test(e.text)) {
+          regime.fs[fsActive].rows.push(e.text);
+        } else if (tsActive) {
+          const tm = e.text.match(/averageFPS[:\s]+([\d.]+)/);
+          if (tm) regime.tsAvgFps.push({ block: tsActive, fps: parseFloat(tm[1]) });
+        }
       }
       if (m.method === 'Runtime.exceptionThrown') {
         const d = m.params.exceptionDetails;
@@ -270,10 +333,19 @@ async function main() {
     // la pagina se atasca el contador se para: es la senal de "vivo".
     try { await evalJs(`(() => { window.__fps = { n: 0, t0: performance.now() }; const tick = () => { window.__fps.n++; requestAnimationFrame(tick); }; requestAnimationFrame(tick); })()`); } catch {}
 
-    // Click en Start
-    const clicked = await evalJs(`(() => { const b = document.querySelector('button#start'); if (!b || b.disabled) return 'no-boton'; b.click(); return 'clicked'; })()`);
-    note('click-start', clicked);
-    if (clicked !== 'clicked') throw new Error('no se pudo pulsar Start: ' + clicked);
+    // Click en Start — o auto-boot por hash (#fps-gpu, #boot, #boot-gpu,
+    // #bench-art, #boot-gpu-logcat arrancan solos al cargar la pagina y
+    // un segundo runCommand chocaria con el motor ya en marcha).
+    const autoBootHash = await evalJs(`(() => { const h = location.hash; return ['#fps-gpu', '#boot', '#boot-gpu', '#bench-art', '#boot-gpu-logcat'].includes(h) ? h : ''; })()`).catch(() => '');
+    let clicked;
+    if (autoBootHash) {
+      clicked = 'auto-boot';
+      note('auto-boot', `hash ${autoBootHash}: la pagina arranca sola, sin click en Start`);
+    } else {
+      clicked = await evalJs(`(() => { const b = document.querySelector('button#start'); if (!b || b.disabled) return 'no-boton'; b.click(); return 'clicked'; })()`);
+      note('click-start', clicked);
+      if (clicked !== 'clicked') throw new Error('no se pudo pulsar Start: ' + clicked);
+    }
 
     // Bucle de vigilancia hasta el deadline. Si la pagina se estrella,
     // no tiene sentido seguir evaluando 10 min con la pestana muerta:
@@ -385,6 +457,14 @@ async function main() {
       if (chrome.exitCode !== null) { crashed = true; note('chrome-muerto', `exitCode=${chrome.exitCode}`); break; }
     }
     if (!booted && Date.now() >= deadline) note('timeout', `sin arranque en ${MINUTES} min`);
+    // Regimen (R1): guardar el log completo de la pagina (#out, con los
+    // volcados framestats/timestats enteros) — console.jsonl corta cada
+    // linea a 1000 caracteres y el texto de la pagina solo se registra
+    // recortado en status.jsonl.
+    try {
+      const fullLog = await evalJs(`(() => { const o = document.getElementById('out'); return o && o.innerText ? o.innerText : document.body.innerText; })()`);
+      if (fullLog) { fs.writeFileSync(path.join(OUT, 'page-log.txt'), fullLog); note('page-log', `guardado (${fullLog.length} chars)`); }
+    } catch (e) { note('page-log-fallo', String(e).slice(0, 200)); }
     ws.close();
   } catch (e) {
     note('harness-error', String(e).slice(0, 500));
@@ -429,6 +509,22 @@ async function main() {
   summary.fpsMin = fpsSamples.length ? Math.min(...fpsSamples) : null;
   summary.guestMaxS = guestMaxS;
   summary.guestRatio = summary.elapsed_s ? Math.round(guestMaxS / summary.elapsed_s * 100) / 100 : null;
+  // Regimen (R1): el guestRatio viejo es un ARTEFACTO (guestMaxS se congela
+  // tras el boot porque los timestamps [N.NNN] dejan de aparecer); el
+  // numero en regimen es regimeFps (drag #fps-gpu) + framestats (reloj
+  // monotono del invitado). Ventana en regimen: 120 s de pared tras
+  // boot-finished (dentro del stay de 300 s).
+  summary.guestRatioNote = 'ARTEFACTO: guestMaxS se congela tras el boot; no usar como velocidad en regimen. Ver regimeFps y framestats.';
+  summary.regimeWindowS = 120;
+  summary.regimeWindow = summary.bootFinishedWallS != null ? { startS: summary.bootFinishedWallS, endS: summary.bootFinishedWallS + 120 } : null;
+  summary.regimeFps = regime.fps;
+  summary.gpuStatWindows = regime.gpuStatWindows;
+  summary.framestats = {};
+  for (const k of Object.keys(regime.fs)) {
+    const b = regime.fs[k];
+    summary.framestats[k] = b.rows.length ? framestatsStats(b.rows, b.beginS != null && b.endS != null ? b.endS - b.beginS : null) : { n: 0, note: 'sin volcado' };
+  }
+  summary.timestatsAvgFps = regime.tsAvgFps;
   fs.writeFileSync(path.join(OUT, 'summary.json'), JSON.stringify(summary, null, 2));
   console.log(`\nRESULTADO: ${booted ? 'ANDROID ARRANCO' : crashed ? 'CRASH' : 'SIN ARRANQUE en ' + MINUTES + ' min'}`);
   console.log('Resumen:', path.join(OUT, 'summary.json'));
