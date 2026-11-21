@@ -121,9 +121,30 @@ STAY=$(python3 -c "import json;print(json.load(open('$CFG')).get('stay_after_boo
 TAP=$(python3 -c "import json;print(json.load(open('$CFG')).get('tap_test',1))")
 AOT_URL=$(python3 -c "import json; c=json.load(open('$ROOT/mirror-v2/run.twoyi.app/config.json')); u=c.get('aotUrls') or ([c['aotUrl']] if c.get('aotUrl') else []); print(u[0] if u else '')" || true)
 [ -n "$AOT_URL" ] || { echo "FALLO: config.json descargado sin aotUrl" >&2; exit 1; }
-echo "Experimento: $EXP (pagina $PAGE, flags: ${FLAGS:-ninguno}, minutos: $MINUTES, stay: ${STAY}s, tap: $TAP, aotUrl: $AOT_URL)"
+# N3: imagen EROFS del sistema. La config trae "image": true; el workflow
+# descarga system.erofs + image_fetch.js a mirror-v2/ (assets del release
+# privado). Aqui se copian a la copia servida: la imagen a
+# run.twoyi.app/image/v107.../system.erofs (serve.py la sirve por rangos
+# como front) y el worker a run.twoyi.app/image_fetch.js (el glue lo carga
+# con new URL("image_fetch.js", location.href); el tarball del front-end
+# 5ff397fe NO lo trae). OJO: image_fetch.js es el del build ec4216c0
+# (el del build pineado ya no esta en el sitio): si el protocolo del
+# mailbox cambio entre builds, el boot fallara con IMAGE_FETCH y se vera.
+IMAGE_URL=""
+if [ "$(python3 -c "import json;print(json.load(open('$CFG')).get('image', False))")" = "True" ]; then
+  IMG_SRC="$ROOT/mirror-v2/image/v107-gles-r1-f5a887c7/system.erofs"
+  FETCH_SRC="$ROOT/mirror-v2/image_fetch.js"
+  [ -f "$IMG_SRC" ] || { echo "FALLO: falta $IMG_SRC (el workflow debe descargar image desde resources antes de correr $EXP)" >&2; exit 1; }
+  [ -f "$FETCH_SRC" ] || { echo "FALLO: falta $FETCH_SRC (el workflow debe descargar image desde resources antes de correr $EXP)" >&2; exit 1; }
+  mkdir -p "$WORK/run.twoyi.app/image/v107-gles-r1-f5a887c7"
+  cp "$IMG_SRC" "$WORK/run.twoyi.app/image/v107-gles-r1-f5a887c7/system.erofs"
+  cp "$FETCH_SRC" "$WORK/run.twoyi.app/image_fetch.js"
+  IMAGE_URL="http://127.0.0.1:8083/image/v107-gles-r1-f5a887c7/system.erofs"
+  echo "Imagen EROFS: $IMG_SRC ($(du -h "$IMG_SRC" | cut -f1)) + image_fetch.js servidos"
+fi
+echo "Experimento: $EXP (pagina $PAGE, flags: ${FLAGS:-ninguno}, minutos: $MINUTES, stay: ${STAY}s, tap: $TAP, aotUrl: $AOT_URL${IMAGE_URL:+, imageUrl: $IMAGE_URL})"
 
-python3 "$ROOT/scripts/serve.py" --port 8083 --root "$WORK" --aot-url "$AOT_URL" > "$RUN_DIR/server.log" 2>&1 &
+python3 "$ROOT/scripts/serve.py" --port 8083 --root "$WORK" --aot-url "$AOT_URL" ${IMAGE_URL:+--image-url "$IMAGE_URL"} > "$RUN_DIR/server.log" 2>&1 &
 SRV_PID=$!
 # OJO: sin el `|| true`, el `wait` devuelve 143 (el servidor muere por
 # SIGTERM) y el trap EXIT pisaria el exit 0 del script con 143: el job
@@ -139,12 +160,15 @@ if ! curl -sf http://127.0.0.1:8083/__health__ >/dev/null 2>&1; then
 fi
 # Pre-flight: config.json debe traer seedUrl local Y aotUrls local. Sin
 # aotUrls el boot correria SIN el pack en silencio (aotPack() -> null).
-python3 - "$AOT_URL" <<'PY'
+# Con imagen (N3) debe traer tambien imageUrl local.
+python3 - "$AOT_URL" "$IMAGE_URL" <<'PY'
 import json, sys, urllib.request
-aot_url = sys.argv[1]
+aot_url, image_url = sys.argv[1], sys.argv[2]
 cfg = json.load(urllib.request.urlopen("http://127.0.0.1:8083/config.json", timeout=5))
 assert cfg.get("seedUrl", "").startswith("http://127.0.0.1:8083/seed/"), cfg
 assert cfg.get("aotUrls") == [aot_url], cfg
+if image_url:
+    assert cfg.get("imageUrl") == image_url, cfg
 print("CONFIG OK:", cfg)
 PY
 echo "Servidor levantado en :8083 (pid $SRV_PID)"

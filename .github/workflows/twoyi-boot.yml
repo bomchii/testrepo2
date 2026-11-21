@@ -17,11 +17,11 @@ on:
   workflow_dispatch:
     inputs:
       experiment:
-        description: 'ID del experimento (G1..G10, sondas S1A/S1B/S2S/S2B/S3/S4/S5/S5-new, re-baseline N1/N1b/N2, regimen R1/R1b/R1c, diagnostico V1)'
+        description: 'ID del experimento (G1..G10, sondas S1A/S1B/S2S/S2B/S3/S4/S5/S5-new, re-baseline N1/N1b/N2, regimen R1/R1b/R1c, diagnostico V1, EROFS N3)'
         required: true
         default: 'G1'
         type: choice
-        options: [G1, G2, G3a, G3b, G4, G5, G6a, G6b, G7, G8, G9, G10, S1A, S1B, S2S, S2B, S3, S4, S5, S5-new, R1, R1b, R1c, N1, N1b, N2, V1]
+        options: [G1, G2, G3a, G3b, G4, G5, G6a, G6b, G7, G8, G9, G10, S1A, S1B, S2S, S2B, S3, S4, S5, S5-new, R1, R1b, R1c, N1, N1b, N2, V1, N3]
 
 jobs:
   boot:
@@ -175,6 +175,38 @@ jobs:
         with:
           path: mirror-v2/seed-v107-mod2
           key: seed-v107-mod2-30ad0d13-files
+
+      # N3 (image=true en la config): la imagen EROFS del sistema
+      # (system.erofs 1,11 GB, raw SHA 3726687b...) es un asset del release
+      # privado (system-erofs-v107.gz, 471 MB, SHA 7797ced6...) + el worker
+      # image_fetch.js del build ec4216c0 (SHA f2caf4fe...; el tarball del
+      # front-end 5ff397fe NO lo trae). Solo se descarga/cachea con N3.
+      # descargar-resources.sh image verifica ambos SHAs, descomprime el
+      # .gz y verifica tamano raw + magia EROFS + SHA raw.
+      - name: Cache de la imagen EROFS (N3)
+        id: cache-image
+        if: inputs.experiment == 'N3'
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            mirror-v2/image
+            mirror-v2/image_fetch.js
+          key: image-v107-3726687b
+
+      - name: Descargar imagen EROFS desde resources (N3, si no hay cache)
+        if: inputs.experiment == 'N3' && steps.cache-image.outputs.cache-hit != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.RESOURCES_TOKEN }}
+        run: bash scripts/descargar-resources.sh image
+
+      - name: Guardar cache de la imagen EROFS (N3)
+        if: inputs.experiment == 'N3' && steps.cache-image.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            mirror-v2/image
+            mirror-v2/image_fetch.js
+          key: image-v107-3726687b
 
       - name: Correr experimento ${{ inputs.experiment }}
         env:

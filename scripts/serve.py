@@ -197,6 +197,7 @@ class TwoyiHandler(BaseHTTPRequestHandler):
     root_dir = ""          # carpeta mirror/ (contiene run.twoyi.app/ y seed.twoyi.app/)
     seed_url_override = ""  # si se pasa --seed-url, config.json usa ese valor
     aot_url_override = ""   # si se pasa --aot-url, config.json incluye ese aotUrl (build nuevo con pack AOT)
+    image_url_override = ""  # si se pasa --image-url, config.json incluye ese imageUrl (N3: EROFS local)
     rewrite_config = True
 
     # -- estado por peticion --
@@ -358,6 +359,11 @@ class TwoyiHandler(BaseHTTPRequestHandler):
             if self.aot_url_override:
                 cfg_out["aotUrl"] = self.aot_url_override
                 cfg_out["aotUrls"] = [self.aot_url_override]
+            # N3: la imagen EROFS del sistema (--image <url> en el boot).
+            # Sin imageUrl el motor arranca del arbol del seed (N1/N2); con
+            # imageUrl lee los bloques de /system por rangos (image_fetch.js).
+            if self.image_url_override:
+                cfg_out["imageUrl"] = self.image_url_override
             body = (json.dumps(cfg_out) + "\n").encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -544,11 +550,12 @@ class TwoyiHandler(BaseHTTPRequestHandler):
 
 
 def make_server(host: str, port: int, root: str, seed_url: str, rewrite: bool,
-                aot_url: str = ""):
+                aot_url: str = "", image_url: str = ""):
     handler = TwoyiHandler
     handler.root_dir = os.path.abspath(root)
     handler.seed_url_override = seed_url
     handler.aot_url_override = aot_url
+    handler.image_url_override = image_url
     handler.rewrite_config = rewrite
     httpd = ThreadingHTTPServer((host, port), handler)
     httpd.daemon_threads = True
@@ -660,6 +667,9 @@ def main(argv=None):
     ap.add_argument("--aot-url", default="",
                     help="aotUrl para config.json (build nuevo con pack AOT; "
                          "por defecto: sin aotUrl, el pack no se descarga)")
+    ap.add_argument("--image-url", default="",
+                    help="imageUrl para config.json (N3: imagen EROFS local; "
+                         "por defecto: sin imageUrl, el boot usa el arbol del seed)")
     ap.add_argument("--no-rewrite-config", action="store_true",
                     help="sirve config.json tal cual (seed remoto; NO offline)")
     ap.add_argument("--self-test", action="store_true",
@@ -689,7 +699,7 @@ def main(argv=None):
 
     httpd = make_server(args.host, args.port, root, args.seed_url,
                         rewrite=not args.no_rewrite_config,
-                        aot_url=args.aot_url)
+                        aot_url=args.aot_url, image_url=args.image_url)
     print(f"Twoyi Web offline — sirviendo {root}")
     print(f"  Front-end: http://{args.host}:{args.port}/")
     print(f"  Seed local: http://{args.host}:{args.port}/seed/{SEED_VERSION}/")

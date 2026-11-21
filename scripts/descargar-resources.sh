@@ -2,7 +2,7 @@
 # Descarga el front-end, el seed o una ROM reempaquetada desde el release
 # privado bomchii/resources (tag twoyi-v107) en vez del sitio oficial
 # (que hace rate-limit 429).
-# Uso: bash scripts/descargar-resources.sh frontend|seed|seed-mod1|seed-mod2
+# Uso: bash scripts/descargar-resources.sh frontend|seed|seed-mod1|seed-mod2|image
 # Requiere GH_TOKEN en el entorno (en Actions: secrets.RESOURCES_TOKEN).
 # Verifica el SHA del tarball y el SHA interno (wasm / ROM) antes de darlo
 # por bueno; cualquier mismatch sale 1 sin dejar nada utilizable.
@@ -12,6 +12,11 @@ cd "$(dirname "$0")/.."
 : "${GH_TOKEN:?GH_TOKEN no definido (en Actions: secrets.RESOURCES_TOKEN)}"
 TAG="twoyi-v107"
 REPO="bomchii/resources"
+
+# TMP antes del case: el caso `image` sale con exit 0 dentro del case y el
+# trap EXIT usa $TMP (con set -u fallaria si aun no estuviera definido).
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
 
 KIND="${1:-}"
 case "$KIND" in
@@ -41,14 +46,53 @@ case "$KIND" in
     CHECK_FILE="mirror-v2/seed-v107-mod2/v107-gles-r1-f5a887c7/rom.tar.gz"
     CHECK_SHA="30ad0d134b5b52ea89a91599e52d733e6bba40ff3814a126d0c9f4d365805a30"
     ;;
+  image)
+    # N3: imagen EROFS del sistema (system.erofs 1.110.261.760 B, raw SHA
+    # 3726687b...; en el release va el .gz, 471.439.944 B, SHA 7797ced6...)
+    # + image_fetch.js del build ec4216c0 (el worker que sirve los bloques
+    # de 1 MiB por rangos; el tarball del front-end 5ff397fe NO lo trae).
+    # El .gz se descomprime en local; la verificacion es el tamano raw,
+    # la magia EROFS (e2e1f5e0 en el offset 1024) y el SHA raw.
+    mkdir -p mirror-v2/image/v107-gles-r1-f5a887c7
+    gh release download "$TAG" --repo "$REPO" --pattern "system-erofs-v107.gz" --dir "$TMP"
+    ACTUAL="$(sha256sum "$TMP/system-erofs-v107.gz" | awk '{print $1}')"
+    [ "$ACTUAL" = "7797ced65dfd6bc92bcca18213923f6e77ccf6c881e543e7e29cabaf2fb37fab" ] \
+      || { echo "ERROR: SHA del system.erofs.gz no coincide: $ACTUAL" >&2; exit 1; }
+    gh release download "$TAG" --repo "$REPO" --pattern "image_fetch-ec4216c0.js" --dir "$TMP"
+    ACTUAL="$(sha256sum "$TMP/image_fetch-ec4216c0.js" | awk '{print $1}')"
+    [ "$ACTUAL" = "f2caf4fe553fae033dbe07c93ea9ff8504518845c71807cd4d9c010db021ed48" ] \
+      || { echo "ERROR: SHA de image_fetch.js no coincide: $ACTUAL" >&2; exit 1; }
+    cp "$TMP/image_fetch-ec4216c0.js" mirror-v2/image_fetch.js
+    gzip -dc "$TMP/system-erofs-v107.gz" > mirror-v2/image/v107-gles-r1-f5a887c7/system.erofs
+    python3 - <<'PY'
+import hashlib
+p = "mirror-v2/image/v107-gles-r1-f5a887c7/system.erofs"
+d = open(p, "rb")
+magic = d.read(2048)[1024:1028]
+assert magic == bytes.fromhex("e2e1f5e0"), f"magia EROFS no coincide: {magic.hex()}"
+d.seek(0)
+h = hashlib.sha256()
+n = 0
+while True:
+    b = d.read(1 << 22)
+    if not b:
+        break
+    h.update(b)
+    n += len(b)
+assert n == 1110261760, f"tamano raw inesperado: {n}"
+assert h.hexdigest() == "3726687b2ede14fdc9ea636647848caeb3044bb7fa538abd60104a4488a89bd7", \
+    f"SHA raw no coincide: {h.hexdigest()}"
+print(f"OK: system.erofs {n} B, magia EROFS, SHA raw verificado.")
+PY
+    echo "OK: image descargado desde resources y verificado."
+    exit 0
+    ;;
   *)
-    echo "Uso: $0 frontend|seed|seed-mod1|seed-mod2" >&2
+    echo "Uso: $0 frontend|seed|seed-mod1|seed-mod2|image" >&2
     exit 2
     ;;
 esac
 
-TMP="$(mktemp -d)"
-trap 'rm -rf "$TMP"' EXIT
 echo "GET $REPO@$TAG -> $ASSET"
 gh release download "$TAG" --repo "$REPO" --pattern "$ASSET" --dir "$TMP"
 ACTUAL="$(sha256sum "$TMP/$ASSET" | awk '{print $1}')"
