@@ -112,8 +112,10 @@ function chromeRssSplitMB() {
 // Cada fila CSV tiene 17+ columnas; FrameCompleted es la 13 (indice 13,
 // nanosegundos del reloj monotono del invitado). El span de FrameCompleted
 // entre la primera y la ultima fila es tiempo de invitado transcurrido en
-// la ventana: dividido por el tiempo de pared entre los marcadores BEGIN
-// y END da la velocidad del invitado en regimen (1,0 = tiempo real).
+// la ventana: dividido por el tiempo de pared de la ventana reset->volcado
+// (anclas WALL_FS/WALL_FS2 del shell, epoch del invitado) da la velocidad
+// del invitado en regimen (1,0 = tiempo real). R1 pasaba BEGIN->END del
+// volcado (~1 s, solo imprimir) y el ratio salia basura (3,47).
 // Las filas con FrameCompleted<=0 son huecos del anillo y se descartan.
 function framestatsStats(rows, wallSpanS) {
   const comp = [];
@@ -192,7 +194,7 @@ async function main() {
   let wasmPeakMB = 0, rssPeakMB = 0, rssSplitPeak = null;
   let fpsSamples = [], guestMaxS = 0;
   // Regimen (R1): NEO_FPS del drag #fps-gpu + volcados framestats del invitado.
-  const regime = { fps: null, gpuStatWindows: 0, fs: { FRAMESTATS: { rows: [], beginS: null, endS: null }, FRAMESTATS2: { rows: [], beginS: null, endS: null } }, tsAvgFps: [] };
+  const regime = { fps: null, gpuStatWindows: 0, fs: { FRAMESTATS: { rows: [], beginS: null, endS: null }, FRAMESTATS2: { rows: [], beginS: null, endS: null } }, tsAvgFps: [], wall: {}, geteventCount: null };
   let fsActive = null; // 'FRAMESTATS' | 'FRAMESTATS2' mientras dura un volcado
   let tsActive = null; // 'TIMESTATS' | 'TIMESTATS2' mientras dura su volcado
   const note = (ev, detail = '') => { summary.events.push({ t: now(), elapsed_s: Math.round((Date.now() - t0) / 1000), ev, detail: String(detail).slice(0, 500) }); console.log(`[${Math.round((Date.now() - t0) / 1000)}s] ${ev} ${detail}`.slice(0, 300)); };
@@ -300,6 +302,18 @@ async function main() {
           const tm = e.text.match(/averageFPS[:\s]+([\d.]+)/);
           if (tm) regime.tsAvgFps.push({ block: tsActive, fps: parseFloat(tm[1]) });
         }
+        // Regimen (R1b): anclas de pared del shell (`echo MARK_BEGIN $(date +%s)`)
+        // para medir las ventanas reset->volcado con el reloj del invitado.
+        // El wallSpanS viejo (BEGIN->END del volcado, ~1 s, solo imprimir)
+        // era basura (R1: ratio 3,47). No choca con FRAMESTATS_BEGIN/END
+        // (esos no llevan numero) ni con NEO_FPS.
+        const wallM = e.text.match(/^([A-Z0-9_]+)_(BEGIN|END) (\d+)$/);
+        if (wallM) {
+          const key = wallM[1], kind = wallM[2] === 'BEGIN' ? 'begin' : 'end';
+          regime.wall[key] = { ...(regime.wall[key] || {}), [kind]: parseInt(wallM[3], 10) };
+        }
+        const gecM = e.text.match(/^GETEVENT_COUNT (\d+)$/);
+        if (gecM) regime.geteventCount = parseInt(gecM[1], 10);
       }
       if (m.method === 'Runtime.exceptionThrown') {
         const d = m.params.exceptionDetails;
@@ -519,10 +533,18 @@ async function main() {
   summary.regimeWindow = summary.bootFinishedWallS != null ? { startS: summary.bootFinishedWallS, endS: summary.bootFinishedWallS + 120 } : null;
   summary.regimeFps = regime.fps;
   summary.gpuStatWindows = regime.gpuStatWindows;
+  summary.wallMarkers = regime.wall || {};
+  summary.geteventCount = regime.geteventCount;
   summary.framestats = {};
   for (const k of Object.keys(regime.fs)) {
     const b = regime.fs[k];
-    summary.framestats[k] = b.rows.length ? framestatsStats(b.rows, b.beginS != null && b.endS != null ? b.endS - b.beginS : null) : { n: 0, note: 'sin volcado' };
+    // R1b: la ventana real es reset->volcado (anclas WALL_FS/WALL_FS2 del shell,
+    // epoch del invitado); el BEGIN->END del volcado (~1 s, solo imprimir)
+    // era basura (R1: ratio 3,47). Sin anclas, se usa el viejo como fallback.
+    const wallKey = k === 'FRAMESTATS' ? 'WALL_FS' : 'WALL_FS2';
+    const w = (regime.wall || {})[wallKey];
+    const wallSpan = (w && w.begin != null && w.end != null) ? w.end - w.begin : (b.beginS != null && b.endS != null ? b.endS - b.beginS : null);
+    summary.framestats[k] = b.rows.length ? framestatsStats(b.rows, wallSpan) : { n: 0, note: 'sin volcado' };
   }
   summary.timestatsAvgFps = regime.tsAvgFps;
   fs.writeFileSync(path.join(OUT, 'summary.json'), JSON.stringify(summary, null, 2));
