@@ -18,15 +18,13 @@ EXP="${1:?falta id de experimento (G1..G9)}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CFG="$ROOT/experiments-v3/$EXP/config.json"
 [ -f "$CFG" ] || { echo "FALLO: no existe $CFG" >&2; exit 1; }
-# G7/G9 piden una ROM reempaquetada (seed.copy): en Actions esas copias
-# no existen todavia; fallar en voz alta en vez de correr con la ROM
-# original y registrar un falso resultado de la palanca.
+# G7/G9 piden una ROM reempaquetada (seed.copy): las copias YA EXISTEN
+# como assets en el release privado bomchii/resources (seed-v107-mod1.tar.gz
+# y seed-v107-mod2.tar.gz); el workflow las descarga a mirror-v2/ antes de
+# correr. Aqui solo se resuelve cual servir y se pasan los preboot gates
+# (portados de scripts/opt-run-v3.sh del proyecto local): si un gate falla,
+# el experimento NO corre con la ROM original ni registra un falso resultado.
 SEED_COPY=$(python3 -c "import json;print(json.load(open('$CFG')).get('seed',{}).get('copy',''))")
-if [ -n "$SEED_COPY" ]; then
-  echo "FALLO: $EXP pide seed.copy=$SEED_COPY, que no existe en este runner." >&2
-  echo "Hay que construir la copia reempaquetada en el runner antes de correr $EXP (ver README-ACTIONS.md)." >&2
-  exit 1
-fi
 [ -d "$ROOT/mirror-v2/run.twoyi.app" ] || { echo "FALLO: falta mirror-v2/run.twoyi.app (corre scripts/descargar-frontend.sh primero)" >&2; exit 1; }
 [ -d "$ROOT/mirror-v2/seed.twoyi.app" ] || { echo "FALLO: falta mirror-v2/seed.twoyi.app (corre scripts/descargar-seed.sh primero)" >&2; exit 1; }
 
@@ -35,7 +33,65 @@ RUN_DIR="$ROOT/runs/$EXP"
 rm -rf "$WORK" "$RUN_DIR"
 mkdir -p "$WORK" "$RUN_DIR"
 cp -r "$ROOT/mirror-v2/run.twoyi.app" "$WORK/run.twoyi.app"
-ln -sfn "$ROOT/mirror-v2/seed.twoyi.app" "$WORK/seed.twoyi.app"
+# Servido del seed: por defecto mirror-v2/seed.twoyi.app (seed original
+# v107); si la config trae seed.copy se sirve la COPIA descargada del
+# release privado, con los preboot gates obligatorios: el sha del
+# rom.tar.gz servido debe diferir del original y files/1182 debe contener
+# cada linea del cambio. Si un gate falla, el script sale 1 y el
+# experimento NO se registra como lever probado.
+if [ -n "$SEED_COPY" ]; then
+  case "$SEED_COPY" in
+    mirror/seed-v107-mod1) SEED_DIR="$ROOT/mirror-v2/seed-v107-mod1" ;;
+    mirror/seed-v107-mod2) SEED_DIR="$ROOT/mirror-v2/seed-v107-mod2" ;;
+    *) echo "FALLO: seed.copy desconocida: $SEED_COPY" >&2; exit 1 ;;
+  esac
+  [ -d "$SEED_DIR" ] || { echo "FALLO: falta $SEED_DIR (el workflow debe descargar seed-modN desde resources antes de correr $EXP)" >&2; exit 1; }
+  ln -sfn "$SEED_DIR" "$WORK/seed.twoyi.app"
+  python3 - "$CFG" "$WORK" <<'PY'
+import hashlib, json, os, re, sys, tarfile
+cfg_path, work = sys.argv[1], sys.argv[2]
+cfg = json.load(open(cfg_path))
+seed = cfg.get("seed", {})
+copy_rel = seed.get("copy", "")
+orig_sha = "fd96c489a27d5fe027cbea43b6f1f02164f81d87c0a907d6711be03623e33e9d"
+seed_dir = os.path.join(work, "seed.twoyi.app")
+real = os.path.realpath(seed_dir)
+print(f"GATE seed dir real: {real}")
+if copy_rel and os.path.basename(copy_rel) not in real:
+    print(f"GATE FAIL: el seed servido no es la copia {copy_rel}")
+    sys.exit(1)
+vers = [d for d in os.listdir(seed_dir) if os.path.isdir(os.path.join(seed_dir, d))]
+if len(vers) != 1:
+    print(f"GATE FAIL: versiones en el seed servido: {vers}")
+    sys.exit(1)
+tar = os.path.join(seed_dir, vers[0], "rom.tar.gz")
+sha = hashlib.sha256(open(tar, "rb").read()).hexdigest()
+print(f"GATE sha servido:  {sha}")
+print(f"GATE sha original: {orig_sha}")
+if sha == orig_sha:
+    print("GATE FAIL: el rom.tar.gz servido es el ORIGINAL (stock)")
+    sys.exit(1)
+# Si la config trae el sha prebuilt de la copia, exigirlo exacto.
+prebuilt_sha = (seed.get("prebuilt") or {}).get("rom_sha256", "")
+if prebuilt_sha and sha != prebuilt_sha:
+    print(f"GATE FAIL: sha servido != prebuilt de la config ({prebuilt_sha})")
+    sys.exit(1)
+for ch in seed.get("changes", []):
+    m = re.search(r"'([^']+)'", ch.get("edit", ""))
+    if not m:
+        continue
+    line = m.group(1)
+    t = tarfile.open(tar)
+    blob = t.extractfile(ch["blob"]).read()
+    if (line + "\n").encode() not in blob:
+        print(f"GATE FAIL: {ch['blob']} no contiene {line!r}")
+        sys.exit(1)
+    print(f"GATE OK: {ch['blob']} contiene {line!r} (x{blob.count(line.encode())})")
+print("GATES DEL SEED OK")
+PY
+else
+  ln -sfn "$ROOT/mirror-v2/seed.twoyi.app" "$WORK/seed.twoyi.app"
+fi
 
 # Parche del detector (loop v3): watchFirstFrame 10% -> 2%. El 10% solo
 # lo superaba el dialogo blanco de ANR; con 2% el canvas visible se

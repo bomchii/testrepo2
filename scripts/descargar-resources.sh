@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Descarga el front-end o el seed desde el release privado bomchii/resources
-# (tag twoyi-v107) en vez del sitio oficial (que hace rate-limit 429).
-# Uso: bash scripts/descargar-resources.sh frontend|seed
+# Descarga el front-end, el seed o una ROM reempaquetada desde el release
+# privado bomchii/resources (tag twoyi-v107) en vez del sitio oficial
+# (que hace rate-limit 429).
+# Uso: bash scripts/descargar-resources.sh frontend|seed|seed-mod1|seed-mod2
 # Requiere GH_TOKEN en el entorno (en Actions: secrets.RESOURCES_TOKEN).
 # Verifica el SHA del tarball y el SHA interno (wasm / ROM) antes de darlo
 # por bueno; cualquier mismatch sale 1 sin dejar nada utilizable.
@@ -26,8 +27,22 @@ case "$KIND" in
     CHECK_FILE="mirror-v2/seed.twoyi.app/v107-gles-r1-f5a887c7/rom.tar.gz"
     CHECK_SHA="fd96c489a27d5fe027cbea43b6f1f02164f81d87c0a907d6711be03623e33e9d"
     ;;
+  seed-mod1)
+    # G7: ROM con ro.hw_timeout_multiplier=5 (build.prop 4902 -> 4929 B).
+    ASSET="seed-v107-mod1.tar.gz"
+    SHA="2aea370e1c7dff6be33c93c51461a4b518fbc993077c67cfca759acd746d82b0"
+    CHECK_FILE="mirror-v2/seed-v107-mod1/v107-gles-r1-f5a887c7/rom.tar.gz"
+    CHECK_SHA="7c41136646017717e8df9bbb662d847e20f42851ade64438fd0899a76a9a9c55"
+    ;;
+  seed-mod2)
+    # G9: ROM tanda RAM (low_ram + lmk Go + heap ART; build.prop 4902 -> 5110 B).
+    ASSET="seed-v107-mod2.tar.gz"
+    SHA="f7c2b0efcf7586e72650d03b44e2507017421d1e4b39970f7f0855c2b06a20d9"
+    CHECK_FILE="mirror-v2/seed-v107-mod2/v107-gles-r1-f5a887c7/rom.tar.gz"
+    CHECK_SHA="30ad0d134b5b52ea89a91599e52d733e6bba40ff3814a126d0c9f4d365805a30"
+    ;;
   *)
-    echo "Uso: $0 frontend|seed" >&2
+    echo "Uso: $0 frontend|seed|seed-mod1|seed-mod2" >&2
     exit 2
     ;;
 esac

@@ -78,10 +78,22 @@ pantalla (el ANR se dictamina mirando la última foto).
 ## Limitaciones conocidas
 
 - **G7 y G9 piden una ROM reempaquetada** (`seed.copy` en su config):
-  esas copias no existen en el runner. `run-experiment.sh` falla en voz
-  alta en vez de correr con la ROM original. Hay que construir la copia
-  en el runner antes (procedimiento en el informe `rom-build-prop.md`
-  del proyecto local) o lanzar G7/G9 en local.
+  las copias YA EXISTEN como assets del release privado
+  `bomchii/resources` (tag `twoyi-v107`): `seed-v107-mod1.tar.gz`
+  (G7, `ro.hw_timeout_multiplier=5`, rom sha `7c411366…`) y
+  `seed-v107-mod2.tar.gz` (G9, tanda RAM, rom sha ver en
+  `experiments-v3/G9/config.json` → `seed.prebuilt.rom_sha256`). El
+  workflow las descarga solo cuando toca ese experimento
+  (`descargar-resources.sh seed-mod1|seed-mod2`, con cache de Actions
+  por sha) y `run-experiment.sh` sirve la copia con los preboot gates
+  portados del corredor local (sha ≠ original + cada línea del cambio
+  presente en `files/1182`); si un gate falla, el experimento no corre
+  ni se registra como lever probado. Para crear una copia nueva (mod3…):
+  construirla en local con el procedimiento de `rom-build-prop.md` §8
+  (igual que `build-seed-mod2.sh`), empaquetarla como
+  `seed-v107-modN.tar.gz` (top-level `seed-v107-modN/`), subirla al
+  release, añadir el kind en `descargar-resources.sh`, los tres pasos
+  condicionales en el workflow y el `prebuilt` en su config.
 - **El SHA de `neo-web.wasm` está fijado** al build actual
   (`rt/16dba2d9d93b1a75`, wasm 11.217.644 B, SHA-256
   `7bfcf6f3…dce9dc3e`; pack AOT `/aot/ab41ad1ebf108da6.wasm`,

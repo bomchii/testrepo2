@@ -89,6 +89,56 @@ jobs:
           path: mirror-v2/seed.twoyi.app
           key: seed-v107-fd96c489
 
+      # G7 (seed.copy=mirror/seed-v107-mod1): la ROM reempaquetada con
+      # ro.hw_timeout_multiplier=5 es un asset del release privado
+      # (seed-v107-mod1.tar.gz, rom sha 7c411366...), igual que el seed
+      # stock. Solo se descarga/cachea cuando el experimento es G7.
+      - name: Cache del seed mod1 (G7)
+        id: cache-seed-mod1
+        if: inputs.experiment == 'G7'
+        uses: actions/cache/restore@v4
+        with:
+          path: mirror-v2/seed-v107-mod1
+          key: seed-v107-mod1-7c411366
+
+      - name: Descargar seed mod1 desde resources (G7, si no hay cache)
+        if: inputs.experiment == 'G7' && steps.cache-seed-mod1.outputs.cache-hit != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.RESOURCES_TOKEN }}
+        run: bash scripts/descargar-resources.sh seed-mod1
+
+      - name: Guardar cache del seed mod1 (G7)
+        if: inputs.experiment == 'G7' && steps.cache-seed-mod1.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: mirror-v2/seed-v107-mod1
+          key: seed-v107-mod1-7c411366
+
+      # G9 (seed.copy=mirror/seed-v107-mod2): la ROM tanda RAM (low_ram +
+      # lmk Go + heap ART) es un asset del release privado
+      # (seed-v107-mod2.tar.gz, rom sha 30ad0d13...). Solo se descarga y
+      # cachea cuando el experimento es G9.
+      - name: Cache del seed mod2 (G9)
+        id: cache-seed-mod2
+        if: inputs.experiment == 'G9'
+        uses: actions/cache/restore@v4
+        with:
+          path: mirror-v2/seed-v107-mod2
+          key: seed-v107-mod2-30ad0d13
+
+      - name: Descargar seed mod2 desde resources (G9, si no hay cache)
+        if: inputs.experiment == 'G9' && steps.cache-seed-mod2.outputs.cache-hit != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.RESOURCES_TOKEN }}
+        run: bash scripts/descargar-resources.sh seed-mod2
+
+      - name: Guardar cache del seed mod2 (G9)
+        if: inputs.experiment == 'G9' && steps.cache-seed-mod2.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: mirror-v2/seed-v107-mod2
+          key: seed-v107-mod2-30ad0d13
+
       - name: Correr experimento ${{ inputs.experiment }}
         env:
           TWOYI_CHROME_PATH: ${{ steps.setup-chrome.outputs.chrome-path }}
