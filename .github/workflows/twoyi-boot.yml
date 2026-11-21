@@ -17,11 +17,11 @@ on:
   workflow_dispatch:
     inputs:
       experiment:
-        description: 'ID del experimento (G1..G10, sondas S1A/S1B/S2S/S2B/S3/S4/S5, re-baseline N1/N2)'
+        description: 'ID del experimento (G1..G10, sondas S1A/S1B/S2S/S2B/S3/S4/S5, re-baseline N1/N1b/N2)'
         required: true
         default: 'G1'
         type: choice
-        options: [G1, G2, G3a, G3b, G4, G5, G6a, G6b, G7, G8, G9, G10, S1A, S1B, S2S, S2B, S3, S4, S5, R1, R1b, N1, N2]
+        options: [G1, G2, G3a, G3b, G4, G5, G6a, G6b, G7, G8, G9, G10, S1A, S1B, S2S, S2B, S3, S4, S5, R1, R1b, N1, N1b, N2]
 
 jobs:
   boot:
@@ -54,7 +54,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: mirror-v2/seed.twoyi.app
-          key: seed-v107-fd96c489
+          key: seed-v107-fd96c489-files
 
       - name: Restaurar cache del front-end
         id: cache-frontend
@@ -82,12 +82,29 @@ jobs:
           GH_TOKEN: ${{ secrets.RESOURCES_TOKEN }}
         run: bash scripts/descargar-resources.sh seed
 
+      # El build nuevo 5ff397fe ya NO lee rom.tar.gz por rangos: lee
+      # seed.index y pide files/<n> sueltos. N1 fallo asi: 1.798
+      # peticiones a files/<n>, todas 404 -> NEO_ERROR 'short ROM file',
+      # exit 125, pagina atascada en 'Fetching the system image...'.
+      # Los chunks viven DENTRO de rom.tar.gz (verificado en local:
+      # files/10 y files/1002 byte-identicos al seed vivo), asi que se
+      # extraen al arbol del seed. La clave de cache nueva (-files)
+      # hace que la primera corrida tras el cambio re-descargue el seed
+      # y guarde el cache YA con files/; en hits posteriores el paso es
+      # un no-op (test -d). Sin --same-owner: ver descargar-resources.sh.
+      - name: Extraer files/ del rom.tar.gz (build nuevo)
+        run: |
+          SEED=mirror-v2/seed.twoyi.app/v107-gles-r1-f5a887c7
+          test -d "$SEED/files" || tar --no-same-owner -xzf "$SEED/rom.tar.gz" -C "$SEED" files
+          test -f "$SEED/files/10" || { echo "FALLO: files/ no extraido en $SEED"; exit 1; }
+          echo "files/ en $SEED: $(find "$SEED/files" -type f | wc -l) archivos"
+
       - name: Guardar cache del seed
         if: steps.cache-seed.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: mirror-v2/seed.twoyi.app
-          key: seed-v107-fd96c489
+          key: seed-v107-fd96c489-files
 
       # G7 (seed.copy=mirror/seed-v107-mod1): la ROM reempaquetada con
       # ro.hw_timeout_multiplier=5 es un asset del release privado
@@ -99,7 +116,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: mirror-v2/seed-v107-mod1
-          key: seed-v107-mod1-7c411366
+          key: seed-v107-mod1-7c411366-files
 
       - name: Descargar seed mod1 desde resources (G7, si no hay cache)
         if: inputs.experiment == 'G7' && steps.cache-seed-mod1.outputs.cache-hit != 'true'
@@ -107,12 +124,22 @@ jobs:
           GH_TOKEN: ${{ secrets.RESOURCES_TOKEN }}
         run: bash scripts/descargar-resources.sh seed-mod1
 
+      # Igual que el seed stock: el build nuevo pide files/<n> sueltos;
+      # se extraen de rom.tar.gz (mismo layout) antes de guardar el cache.
+      - name: Extraer files/ del rom.tar.gz mod1 (G7)
+        if: inputs.experiment == 'G7'
+        run: |
+          SEED=mirror-v2/seed-v107-mod1/v107-gles-r1-f5a887c7
+          test -d "$SEED/files" || tar --no-same-owner -xzf "$SEED/rom.tar.gz" -C "$SEED" files
+          test -f "$SEED/files/10" || { echo "FALLO: files/ no extraido en $SEED"; exit 1; }
+          echo "files/ en $SEED: $(find "$SEED/files" -type f | wc -l) archivos"
+
       - name: Guardar cache del seed mod1 (G7)
         if: inputs.experiment == 'G7' && steps.cache-seed-mod1.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: mirror-v2/seed-v107-mod1
-          key: seed-v107-mod1-7c411366
+          key: seed-v107-mod1-7c411366-files
 
       # G9 (seed.copy=mirror/seed-v107-mod2): la ROM tanda RAM (low_ram +
       # lmk Go + heap ART) es un asset del release privado
@@ -124,7 +151,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: mirror-v2/seed-v107-mod2
-          key: seed-v107-mod2-30ad0d13
+          key: seed-v107-mod2-30ad0d13-files
 
       - name: Descargar seed mod2 desde resources (G9, si no hay cache)
         if: inputs.experiment == 'G9' && steps.cache-seed-mod2.outputs.cache-hit != 'true'
@@ -132,12 +159,22 @@ jobs:
           GH_TOKEN: ${{ secrets.RESOURCES_TOKEN }}
         run: bash scripts/descargar-resources.sh seed-mod2
 
+      # Igual que el seed stock: el build nuevo pide files/<n> sueltos;
+      # se extraen de rom.tar.gz (mismo layout) antes de guardar el cache.
+      - name: Extraer files/ del rom.tar.gz mod2 (G9)
+        if: inputs.experiment == 'G9'
+        run: |
+          SEED=mirror-v2/seed-v107-mod2/v107-gles-r1-f5a887c7
+          test -d "$SEED/files" || tar --no-same-owner -xzf "$SEED/rom.tar.gz" -C "$SEED" files
+          test -f "$SEED/files/10" || { echo "FALLO: files/ no extraido en $SEED"; exit 1; }
+          echo "files/ en $SEED: $(find "$SEED/files" -type f | wc -l) archivos"
+
       - name: Guardar cache del seed mod2 (G9)
         if: inputs.experiment == 'G9' && steps.cache-seed-mod2.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: mirror-v2/seed-v107-mod2
-          key: seed-v107-mod2-30ad0d13
+          key: seed-v107-mod2-30ad0d13-files
 
       - name: Correr experimento ${{ inputs.experiment }}
         env:

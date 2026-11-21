@@ -1,0 +1,18 @@
+{
+  "chrome_flags": "",
+  "hypothesis": "N1b, humo (~3 min): reintento de N1 tras corregir la causa de su fallo. N1 fallo porque el build nuevo 5ff397fe ya no lee rom.tar.gz por rangos: lee seed.index y pide files/<n> sueltos (1.798 peticiones, todas 404 -> NEO_ERROR 'short ROM file', exit 125, pagina atascada en 'Fetching the system image...'). El workflow ahora extrae files/ de rom.tar.gz al arbol del seed antes de correr (verificado en local: files/10 y files/1002 byte-identicos al seed vivo). Misma base G5 exacta que N1 (shared + indice + chain + AOT on + --engine-stats). Observables: (1) requested= aot_modules — el pack ab41ad1e se construyo para el build viejo y el glue nuevo dice que el runtime lo toma 'solo si es el que su manifest construyo': si aot_modules=0 el pack NO liga al motor nuevo y N2 cambia de sentido (AOT off efectivo); (2) lineas NEO_JIT baseline; (3) boot/fps del humo; (4) 0 peticiones 404 a files/<n> en server.log. OJO: serve.py reescribe config.json sin imageUrl, asi que el boot NO usa --image (EROFS 1,03 GB): arranca del arbol del seed como el build viejo; la via EROFS es candidata N3 aparte.",
+  "id": "N1b",
+  "index_patches": [
+    {
+      "replace": "const runtimeOptions = [...(pack ? ['--aot', 'on'] : aotParam ? ['--aot', aotParam] : []), '--engine-stats'];",
+      "search": "const runtimeOptions = pack ? ['--aot', 'on'] : aotParam ? ['--aot', aotParam] : [];"
+    }
+  ],
+  "js_flags": "",
+  "minutes": 3,
+  "name": "Reintento humo 3 min sobre build nuevo rt/5ff397fe8525b7d1 (base G5, con files/ extraidos)",
+  "neo_patches": [],
+  "page": "/",
+  "stay_after_boot": 0,
+  "tap_test": 0
+}
