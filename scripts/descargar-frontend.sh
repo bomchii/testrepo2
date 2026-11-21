@@ -2,11 +2,10 @@
 # Descarga el front-end ACTUAL de run.twoyi.app (build con AOT + --jit)
 # en mirror-v2/run.twoyi.app. SOLO descarga: no commitea nada (mirror-v2/
 # esta en .gitignore; es codigo cerrado de Twoyi, nunca va al repo publico).
-# El hash del build (rt/...) se extrae del index.html descargado, asi que
-# un redespliegue del JS no rompe la descarga; pero neo-web.wasm se
-# verifica contra el SHA del build contra el que se verificaron los
-# parches de los experimentos (rt/1e56ecde9f337f28): si cambia, se falla
-# en voz alta en vez de correr experimentos sobre un build distinto.
+# neo-web.wasm se verifica contra el SHA del build contra el que se
+# verificaron los parches de los experimentos (rt/5ff397fe8525b7d1): si
+# cambia, se falla en voz alta en vez de correr experimentos sobre un
+# build distinto.
 # Pausas de 2 s entre peticiones (Cloudflare hace 429 tras ~10 rapidas).
 # Uso: bash scripts/descargar-frontend.sh
 set -euo pipefail
@@ -14,10 +13,10 @@ UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Ge
 FRONT="mirror-v2/run.twoyi.app"
 # Build contra el que se verificaron los parches de los experimentos G1-G9.
 # OJO: run.twoyi.app redespliega a menudo (el build anterior,
-# rt/1e56ecde9f337f28, ya da 404); si el SHA cambia, se falla en voz alta
+# rt/16dba2d9d93b1a75, ya da 404); si el SHA cambia, se falla en voz alta
 # y hay que revisar los parches antes de correr.
-EXPECTED_WASM_SHA="7bfcf6f3fd987646c4195260b966a1e29df24f23971f1361f20947acdce9dc3e"
-EXPECTED_WASM_BYTES=11217644
+EXPECTED_WASM_SHA="cdcf0b76f0abe047e4cb12bf2f5725c08e5d8e5c9e4dd92e8c6fd01204cae99e"
+EXPECTED_WASM_BYTES=11298874
 mkdir -p "$FRONT/rt" "$FRONT/aot" "$FRONT"
 get() { # get URL DESTINO (falla en voz alta con diagnostico)
   echo "GET $1 -> $2"
@@ -46,7 +45,13 @@ AOT_URL=$(python3 -c "import json; c=json.load(open('$FRONT/config.json')); u=c.
 [ -n "$AOT_URL" ] || { echo "FALLO: config.json sin aotUrl" >&2; exit 1; }
 echo "aotUrl: $AOT_URL"
 get "https://run.twoyi.app/sw.js" "$FRONT/sw.js"
-get "https://run.twoyi.app/download.js" "$FRONT/download.js"
+# download.js existia en el build 16dba pero el sitio ya no lo sirve
+# (404 en rt/5ff397fe8525b7d1) y el index.html nuevo no lo referencia:
+# descarga opcional, se sigue sin el.
+if ! curl -sfL -A "$UA" -o "$FRONT/download.js" "https://run.twoyi.app/download.js"; then
+  echo "AVISO: download.js no existe en este build (404); se sigue sin el"
+  rm -f "$FRONT/download.js"
+fi
 get "https://run.twoyi.app/manifest.webmanifest" "$FRONT/manifest.webmanifest"
 get "https://run.twoyi.app/icon.svg" "$FRONT/icon.svg"
 get "https://run.twoyi.app/icon-192.png" "$FRONT/icon-192.png"
@@ -79,7 +84,7 @@ echo "neo-web.wasm: $WASM_BYTES B sha256=$WASM_SHA"
 echo "pack AOT ($AOT_URL): $AOT_BYTES B sha256=$AOT_SHA"
 [ "$WASM_BYTES" = "$EXPECTED_WASM_BYTES" ] || { echo "AVISO: neo-web.wasm cambio de tamano (esperado $EXPECTED_WASM_BYTES)" >&2; }
 if [ "$WASM_SHA" != "$EXPECTED_WASM_SHA" ]; then
-  echo "FALLO: neo-web.wasm NO es el build rt/16dba2d9d93b1a75 contra el que se verificaron los parches." >&2
+  echo "FALLO: neo-web.wasm NO es el build rt/5ff397fe8525b7d1 contra el que se verificaron los parches." >&2
   echo "El sitio redesplego: hay que revisar los parches de experiments-v3/ antes de correr." >&2
   exit 1
 fi

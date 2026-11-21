@@ -16,10 +16,10 @@ REPO="bomchii/resources"
 KIND="${1:-}"
 case "$KIND" in
   frontend)
-    ASSET="frontend-rt-16dba2d9d93b1a75.tar.gz"
-    SHA="5351827fb5087c42b749467e339a98845913f35ba937f65266a4acec1450e0cf"
-    CHECK_FILE="mirror-v2/run.twoyi.app/rt/16dba2d9d93b1a75/neo-web.wasm"
-    CHECK_SHA="7bfcf6f3fd987646c4195260b966a1e29df24f23971f1361f20947acdce9dc3e"
+    ASSET="frontend-rt-5ff397fe8525b7d1.tar.gz"
+    SHA="33b1fb17cf0cca7f5c84a037b7e991faab0a68bdc2b705653d34681eb4b9c438"
+    CHECK_FILE="mirror-v2/run.twoyi.app/rt/5ff397fe8525b7d1/neo-web.wasm"
+    CHECK_SHA="cdcf0b76f0abe047e4cb12bf2f5725c08e5d8e5c9e4dd92e8c6fd01204cae99e"
     ;;
   seed)
     ASSET="seed-v107.tar.gz"

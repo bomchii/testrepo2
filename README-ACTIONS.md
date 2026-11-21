@@ -23,11 +23,11 @@ harness (`summary.json`, `console.jsonl`, capturas PNG).
 |---|---|
 | `.github/workflows/twoyi-boot.yml` | Workflow: checkout, Node 24, Chrome, caché del seed y del front-end, descarga desde el release privado solo si no hay cache, experimento, verificación, artefactos |
 | `scripts/descargar-resources.sh` | Baja el front-end o el seed desde el release privado `bomchii/resources` (tag `twoyi-v107`) con `GH_TOKEN`; verifica el SHA del tarball y el SHA interno (wasm / ROM) antes de extraer |
-| `frontend-pin.txt` | Hash del build `rt/` que prueba el loop (hoy `16dba2d9d93b1a75`); es la clave del cache del front-end. Cambiarlo = descargar el build nuevo una vez y re-cachearlo |
+| `frontend-pin.txt` | Hash del build `rt/` que prueba el loop (hoy `5ff397fe8525b7d1`); es la clave del cache del front-end. Cambiarlo = descargar el build nuevo una vez y re-cachearlo |
 | `tests/twoyi-fullboot-cdp.mjs` | Harness CDP (Chrome real, sin Playwright). La ruta de Chrome viene de `TWOYI_CHROME_PATH` |
 | `scripts/serve.py` | Servidor local (COOP/COEP, rangos 206, reescribe `config.json` con seed/aot locales) |
 | `scripts/opt-apply-patches.py` | Aplica los parches `{search, replace}` de la config al front-end |
-| `scripts/descargar-frontend.sh` | Baja el front-end actual; verifica el SHA de `neo-web.wasm` contra el build pineado (`rt/16dba2d9d93b1a75`) |
+| `scripts/descargar-frontend.sh` | Baja el front-end actual; verifica el SHA de `neo-web.wasm` contra el build pineado (`rt/5ff397fe8525b7d1`) |
 | `scripts/descargar-seed.sh` | Baja el seed v107 (5 archivos, SHA verificado) |
 | `scripts/run-experiment.sh` | Corre un experimento: copia el front-end, parche del detector (10% → 2%), parches de la config, servidor, harness |
 | `experiments-v3/G1..G9/config.json` | Configs del loop v3 (misma cola que el loop local) |
@@ -95,10 +95,10 @@ pantalla (el ANR se dictamina mirando la última foto).
   release, añadir el kind en `descargar-resources.sh`, los tres pasos
   condicionales en el workflow y el `prebuilt` en su config.
 - **El SHA de `neo-web.wasm` está fijado** al build actual
-  (`rt/16dba2d9d93b1a75`, wasm 11.217.644 B, SHA-256
-  `7bfcf6f3…dce9dc3e`; pack AOT `/aot/ab41ad1ebf108da6.wasm`,
-  75.031.139 B). `run.twoyi.app` redespliega a menudo (el build
-  anterior, `rt/1e56ecde9f337f28`, ya da 404): si el SHA cambia,
+  (`rt/5ff397fe8525b7d1`, wasm 11.298.874 B, SHA-256
+  `cdcf0b76…cae99e`; pack AOT `/aot/ab41ad1ebf108da6.wasm`,
+  75.031.139 B, mismo pack que el build anterior). `run.twoyi.app` redespliega a menudo (el build
+  anterior, `rt/16dba2d9d93b1a75`, ya da 404): si el SHA cambia,
   `descargar-frontend.sh` falla en voz alta y hay que actualizar el
   pin y revisar los parches de `experiments-v3/` antes de correr.
   `config.json` del build actual usa `aotUrls` (array); `serve.py`
