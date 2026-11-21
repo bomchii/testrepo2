@@ -1,0 +1,23 @@
+{
+  "chrome_flags": "",
+  "hypothesis": "Sonda 5-new, humo (~3 min): re-sonda de NEO_JIT_THRESHOLD=1 + NEO_JIT_TRACE=1 por var ENV de neo-web.js, ahora sobre el build nuevo rt/5ff397fe8525b7d1 (adoptado 2026-11-21). El build nuevo trae otro formato de trace JIT por unidad (NEO_JIT unit=%u pc=... stepped=%u wasm=%zu us=%lld) y el JIT podria estar vivo ahi aunque en el build viejo estaba muerto (S5: 32 lineas NEO_JIT, todas units=0). Base G5 exacta (shared + indice + chain + AOT on) + --engine-stats. Observables: lineas NEO_JIT unit= por unidad y NEO_JIT units= > 0 (baseline N1b: 0 lineas NEO_JIT); cambio en boot/fps. Si units sigue 0, la ruta del umbral JIT queda cerrada TAMBIEN en el build nuevo; siguiente seria S6 (AOT off por JS + threshold por ENV) o N3 (EROFS) o W1.",
+  "id": "S5-new",
+  "index_patches": [
+    {
+      "replace": "const runtimeOptions = [...(pack ? ['--aot', 'on'] : aotParam ? ['--aot', aotParam] : []), '--engine-stats'];",
+      "search": "const runtimeOptions = pack ? ['--aot', 'on'] : aotParam ? ['--aot', aotParam] : [];"
+    }
+  ],
+  "js_flags": "",
+  "minutes": 3,
+  "name": "Re-sonda umbral JIT por ENV del glue sobre build nuevo rt/5ff397fe8525b7d1",
+  "neo_patches": [
+    {
+      "replace": "var ENV={NEO_JIT_THRESHOLD:'1',NEO_JIT_TRACE:'1'};",
+      "search": "var ENV={};"
+    }
+  ],
+  "page": "/",
+  "stay_after_boot": 0,
+  "tap_test": 0
+}
