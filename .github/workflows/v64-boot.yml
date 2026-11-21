@@ -1,0 +1,148 @@
+name: v64 Android 16 boot (smoke)
+
+# v64 (Android 16 en WASM, plan B de Twoyi): build + smoke headless hasta
+# sys.boot_completed=1 en un runner GitHub-hosted (4 vCPU, 16 GB RAM).
+#
+# El repo v64 NO se commitea aqui: se clona de speedyHKjournalist/v64 @
+# 6448e1f en cada corrida (solo nuestro workflow y glue viven en testrepo2).
+# La imagen Android se baja de ci.android.com con el propio script del repo
+# (tools/a64_android.mjs --download, con SHA-256 + MD5 verificados por el
+# script). El smoke es el harness del repo (tests/a64/android_boot.mjs)
+# en modo v86, JIT + paralelo, 4 cores, sin Venus (SwiftShader en el
+# invitado, sin Chrome): pasa cuando adbd responde y sys.boot_completed=1.
+# A64_ANDROID_WAIT=boot_completed es OBLIGATORIO: sin el, el harness pasa
+# en cuanto responde adbd (system_server), antes del boot completado.
+#
+# Veredicto del informe (STATUS.md en el proyecto local): cold boot > ~40
+# min o RSS > 6 GB -> abandonar v64 como plan B. El RSS pico del proceso
+# Node sale en result.json (metrics.max_rss_mib).
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  v64-boot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - name: Checkout testrepo2 (este repo, solo para el workflow)
+        uses: actions/checkout@v4
+
+      - name: Checkout v64 @ 6448e1f
+        uses: actions/checkout@v4
+        with:
+          repository: speedyHKjournalist/v64
+          ref: 6448e1f
+          path: v64
+
+      - name: Setup Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Setup toolchain
+        run: |
+          set -euxo pipefail
+          sudo apt-get update -y
+          sudo apt-get install -y clang nasm openjdk-21-jdk unzip python3
+          rustup toolchain install stable --profile minimal
+          rustup target add wasm32-unknown-unknown
+          rustc --version
+          cargo --version
+          clang --version | head -1
+          java -version 2>&1 | head -2
+          node --version
+          python3 --version
+          nproc
+          free -h
+          df -h
+
+      - name: npm ci
+        working-directory: v64
+        run: npm ci
+
+      - name: Build all (x86 + libv86 + glbridge)
+        working-directory: v64
+        run: |
+          set -euxo pipefail
+          time make all
+          ls -la build/v86.wasm build/libv86.mjs build/libv86.js
+
+      - name: Build ARM64 wasm (release + paralelo)
+        working-directory: v64
+        run: |
+          set -euxo pipefail
+          time make build/v86-arm64.wasm build/v86-arm64-parallel.wasm
+          ls -la build/v86-arm64.wasm build/v86-arm64-parallel.wasm
+
+      - name: Android materials (descarga + procesado de la imagen)
+        working-directory: v64
+        run: |
+          set -euxo pipefail
+          ok=0
+          for i in 1 2 3; do
+            if node tools/a64_android.mjs --download; then ok=1; break; fi
+            echo "materials intento $i fallo; reintentando en 30 s"
+            sleep 30
+          done
+          [ "$ok" = 1 ] || { echo "FALLO: materials tras 3 intentos"; exit 1; }
+          ls -la build/a64-android/out/Image build/a64-android/out/initrd.img build/a64-android/out/disk.img
+          python3 - <<'EOF'
+          import hashlib, json
+          m = json.load(open('build/a64-android/out/manifest.json'))
+          for name, want in m['results'].items():
+              h = hashlib.sha256(open(f'build/a64-android/out/{name}', 'rb').read()).hexdigest()
+              assert h == want, f'{name}: {h} != {want}'
+              print(f'{name}: SHA OK')
+          print('manifest build id:', m['build']['id'])
+          EOF
+          df -h
+          free -h
+
+      - name: Smoke v86 hasta sys.boot_completed=1
+        working-directory: v64
+        timeout-minutes: 60
+        env:
+          A64_ANDROID_TARGET: v86
+          A64_JIT: 1
+          A64_PARALLEL: 1
+          A64_CORES: 4
+          A64_ANDROID_WAIT: boot_completed
+          A64_ANDROID_TIMEOUT: 2700000
+        run: |
+          set -euxo pipefail
+          free -h
+          time node tests/a64/android_boot.mjs
+
+      - name: Resumen del smoke
+        if: always()
+        working-directory: v64
+        run: |
+          R="build/a64-android/runs/v86-jit-par-1536m-4c/result.json"
+          if [ -f "$R" ]; then
+            python3 - "$R" <<'EOF'
+          import json, sys
+          r = json.load(open(sys.argv[1]))
+          print('tag:', r.get('tag'))
+          print('marks:', json.dumps(r.get('marks', {}), indent=2))
+          print('ms total:', r.get('ms'))
+          print('metrics:', json.dumps(r.get('metrics', {}), indent=2))
+          EOF
+          else
+            echo "SIN result.json: el smoke no llego a escribirlo (ver logs y kernel.log)"
+            ls build/a64-android/runs/ 2>/dev/null || echo "sin directorio runs"
+          fi
+          df -h
+
+      - name: Subir artefactos del smoke
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: v64-smoke
+          path: |
+            v64/build/a64-android/runs/
+            v64/build/a64-android/out/manifest.json
+          if-no-files-found: warn
