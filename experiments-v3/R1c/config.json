@@ -1,0 +1,42 @@
+{
+  "id": "R1c",
+  "name": "Regimen en el build nuevo: framestats2 dentro del arrastre + entrada verificada + ART bench separado",
+  "hypothesis": "R1c: medir la velocidad en REGIMEN sobre el build nuevo rt/5ff397fe8525b7d1 (adoptado 2026-11-21). R1/R1b midieron 0,024 fps en el build VIEJO; N2 no midio regimen (sin framestats). Corrige los tres fallos honestos de R1b: (1) mkdir -p /data/local/tmp/twoyi-sf ANTES de lanzar getevent (en R1b el dir no existia y el getevent nunca escribio; el arrastre quedo sin verificar). (2) dumpsys input truncado a 20.000 (en R1b se corto a 8.000 antes de RecentQueue). (3) La ventana framestats2 de R1b (reset ~80 s, volcado ~120 s de shell) cayo ANTES del arrastre (boot 187 s de pared -> arrastre a 202-242 s), por eso framestats2 dio n=1: ahora reset2 a ~70 s de shell y volcado a ~200 s de shell, ventana que cubre el arrastre completo (boot 130-190 s de pared -> arrastre 145-245 s de pared; shell t=0 ~60-80 s de pared); el bench ART va 30 s DESPUES del volcado, separado del arrastre. Base = R1b exacta (shared + indice + chain, AOT on, --engine-stats, stay 300 s, tap). Observables: NEO_FPS (posts/segundos/fps del arrastre, 0 en R1b), framestats2 n>1 con timestamps del reloj monotono del invitado dentro del arrastre, GETEVENT_COUNT > 0, INPUT RecentQueue con el arrastre, deltas SAMPLE en regimen, ART bench ms. Comparar contra R1b: 0,024 fps, 27,5 M instr/s en regimen, stay 10,0 M instr/s.",
+  "chrome_flags": "",
+  "js_flags": "",
+  "minutes": 20,
+  "page": "/?framestats#fps-gpu",
+  "stay_after_boot": 300,
+  "tap_test": 1,
+  "neo_patches": [],
+  "index_patches": [
+    {
+      "replace": "  (async () => { const p = aotPack(); try { await prepareRom(); await p; await aotWarmed; } catch (e) { line('error: ' + (e.message || e), 'err'); return; } runCommand(argv, {writable: true, display: '720x1280@240', gpu: true}); })();",
+      "search": "  runCommand(argv, {writable: true, display: '720x1280@240', gpu: true});"
+    },
+    {
+      "replace": "  const runtimeOptions = [...(pack ? ['--aot', 'on'] : aotParam ? ['--aot', aotParam] : []), '--engine-stats'];",
+      "search": "  const runtimeOptions = pack ? ['--aot', 'on'] : aotParam ? ['--aot', aotParam] : [];"
+    },
+    {
+      "replace": "/system/bin/init second_stage >/dev/null 2>&1 & toybox mkdir -p /data/local/tmp/twoyi-sf; /system/bin/getevent -t >/data/local/tmp/twoyi-sf/getevent.log 2>&1 & toybox sleep 45;",
+      "search": "/system/bin/init second_stage >/dev/null 2>&1 & toybox sleep 45;"
+    },
+    {
+      "replace": "toybox sleep 45; echo WALL_FS_BEGIN $(toybox date +%s); ' +\n       '/system/bin/dumpsys gfxinfo com.android.systemui reset >/dev/null;",
+      "search": "toybox sleep 45; ' +\n       '/system/bin/dumpsys gfxinfo com.android.systemui reset >/dev/null;"
+    },
+    {
+      "replace": "toybox sleep 20; echo WALL_FS_END $(toybox date +%s); echo FRAMESTATS_BEGIN;",
+      "search": "toybox sleep 20; echo FRAMESTATS_BEGIN;"
+    },
+    {
+      "replace": "echo HWCLOG_END; toybox sleep 5; echo WALL_FS2_BEGIN $(toybox date +%s); /system/bin/dumpsys gfxinfo com.android.systemui reset >/dev/null; /system/bin/dumpsys SurfaceFlinger --timestats -clear -enable >/dev/null; toybox sleep 130; echo WALL_FS2_END $(toybox date +%s); echo FRAMESTATS2_BEGIN; /system/bin/dumpsys gfxinfo com.android.systemui framestats; echo FRAMESTATS2_END; echo TIMESTATS2_BEGIN; /system/bin/dumpsys SurfaceFlinger --timestats -dump 2>&1 | toybox head -c 8000; echo TIMESTATS2_END']",
+      "search": "echo HWCLOG_END']"
+    },
+    {
+      "replace": "echo TIMESTATS2_BEGIN; /system/bin/dumpsys SurfaceFlinger --timestats -dump 2>&1 | toybox head -c 8000; echo TIMESTATS2_END; echo INPUT_BEGIN $(toybox date +%s); /system/bin/dumpsys input 2>&1 | toybox head -c 20000; echo INPUT_END; echo GETEVENT_BEGIN $(toybox date +%s); echo GETEVENT_COUNT $(toybox wc -l < /data/local/tmp/twoyi-sf/getevent.log); toybox tail -n 30 /data/local/tmp/twoyi-sf/getevent.log; echo GETEVENT_END; toybox sleep 30; echo ARTBENCH_BEGIN $(toybox date +%s); /apex/com.android.art/bin/dalvikvm64 -Xusejit:false -Xnoimage-dex2oat -Ximage:/system/framework/boot.art:/system/framework/boot-framework.art -cp /system/framework/am.jar com.android.commands.am.Am; echo ARTBENCH_END $(toybox date +%s); echo STAY_BEGIN $(toybox date +%s); toybox sleep 600; echo STAY_END $(toybox date +%s)']",
+      "search": "echo TIMESTATS2_BEGIN; /system/bin/dumpsys SurfaceFlinger --timestats -dump 2>&1 | toybox head -c 8000; echo TIMESTATS2_END']"
+    }
+  ]
+}
