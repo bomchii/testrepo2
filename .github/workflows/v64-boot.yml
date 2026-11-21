@@ -35,7 +35,9 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: speedyHKjournalist/v64
-          ref: 6448e1f
+          # SHA completo: con el corto (6448e1f) checkout lo trata como
+          # rama/tag y el fetch falla. HEAD verificado en local.
+          ref: 6448e1f3e6140684d1294aba67e91f46e924b3f3
           path: v64
 
       - name: Setup Node 24
